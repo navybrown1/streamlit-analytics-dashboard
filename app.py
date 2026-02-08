@@ -8,6 +8,7 @@ from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -15,87 +16,403 @@ MAX_UPLOAD_MB = 200
 
 st.set_page_config(page_title="Business Analytics Dashboard", page_icon="📊", layout="wide")
 
-# Custom UI theme
+# Modern, dynamic UI theme with animations
 st.markdown("""
 <style>
-    /* Dark header bar */
-    header[data-testid="stHeader"] { background: linear-gradient(90deg, #0b0f1a 0%, #1a1033 100%); }
-
-    /* Main background */
-    .stApp { background: #f8fafc; }
-
-    /* Sidebar */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
+    * {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    
+    /* Animated gradient background */
+    .stApp {
+        background: linear-gradient(-45deg, #f0f4ff, #e6f3ff, #f0e6ff, #ffe6f0);
+        background-size: 400% 400%;
+        animation: gradientShift 15s ease infinite;
+    }
+    
+    @keyframes gradientShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Header styling */
+    header[data-testid="stHeader"] {
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+    }
+    
+    /* Sidebar with glassmorphism */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0b0f1a 0%, #111827 100%);
-        color: #e2e8f0;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%);
+        backdrop-filter: blur(20px);
+        border-right: 1px solid rgba(99, 102, 241, 0.2);
     }
-    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] .stCaption, section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span { color: #cbd5e1 !important; }
-    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; }
+    
+    section[data-testid="stSidebar"] > div {
+        padding-top: 2rem;
+    }
+    
+    section[data-testid="stSidebar"] .stMarkdown, 
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stCaption, 
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span {
+        color: #e2e8f0 !important;
+    }
+    
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {
+        color: #f1f5f9 !important;
+        font-weight: 700 !important;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Animated sidebar buttons */
     section[data-testid="stSidebar"] .stButton > button {
-        background: linear-gradient(135deg, #6366f1, #8b5cf6);
-        color: white; border: none; border-radius: 8px;
-        font-weight: 600; transition: all 0.3s ease;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        padding: 12px 24px;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        position: relative;
+        overflow: hidden;
     }
+    
+    section[data-testid="stSidebar"] .stButton > button::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        transition: left 0.5s;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button:hover::before {
+        left: 100%;
+    }
+    
     section[data-testid="stSidebar"] .stButton > button:hover {
-        background: linear-gradient(135deg, #818cf8, #a78bfa);
-        transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+        background: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%);
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(99, 102, 241, 0.5);
     }
-
-    /* Metric cards */
+    
+    /* Glassmorphic metric cards with animations */
     div[data-testid="stMetric"] {
-        background: white; padding: 16px 20px; border-radius: 12px;
-        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(10px);
+        padding: 24px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    div[data-testid="stMetric"]::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);
+        transform: scaleX(0);
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    div[data-testid="stMetric"]:hover::before {
+        transform: scaleX(1);
+    }
+    
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 16px 48px rgba(99, 102, 241, 0.2);
+        border-color: rgba(99, 102, 241, 0.4);
+    }
+    
+    div[data-testid="stMetric"] label {
+        color: #64748b !important;
+        font-weight: 600 !important;
+        font-size: 0.875rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        color: #1e293b !important;
+        font-weight: 800 !important;
+        font-size: 2rem !important;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* Modern tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(10px);
+        padding: 8px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 12px;
+        padding: 12px 24px;
+        font-weight: 600;
+        color: #64748b;
+        transition: all 0.3s ease;
+        border: none;
+        background: transparent;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+        color: white !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        transform: scale(1.05);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+        background: rgba(99, 102, 241, 0.1);
+        color: #6366f1;
+    }
+    
+    /* Animated download buttons */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        padding: 12px 28px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    }
+    
+    .stDownloadButton > button:hover {
+        background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+    }
+    
+    /* Expanders with modern styling */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        color: #1e293b;
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: 12px 16px;
+        border: 1px solid rgba(99, 102, 241, 0.2);
         transition: all 0.3s ease;
     }
-    div[data-testid="stMetric"]:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        border-color: rgba(99,102,241,0.3); transform: translateY(-2px);
+    
+    .streamlit-expanderHeader:hover {
+        background: rgba(99, 102, 241, 0.05);
+        border-color: rgba(99, 102, 241, 0.4);
     }
-    div[data-testid="stMetric"] label { color: #64748b !important; font-weight: 600 !important; }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #1e293b !important; font-weight: 700 !important; }
-
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0; padding: 10px 20px;
-        font-weight: 600; color: #64748b;
-    }
-    .stTabs [aria-selected="true"] {
-        background: white; color: #6366f1 !important;
-        border-bottom: 3px solid #6366f1;
-    }
-
-    /* Download buttons */
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, #6366f1, #8b5cf6);
-        color: white; border: none; border-radius: 8px;
-        font-weight: 600; padding: 8px 20px;
-    }
-    .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #818cf8, #a78bfa);
-        transform: translateY(-1px);
-    }
-
-    /* Expanders */
-    .streamlit-expanderHeader { font-weight: 600; color: #1e293b; }
-
+    
     /* Dividers */
-    hr { border-color: #e2e8f0 !important; }
-
-    /* Title styling */
-    .dashboard-title {
-        background: linear-gradient(135deg, #0b0f1a, #1a1033);
-        padding: 32px; border-radius: 16px; margin-bottom: 24px;
-        text-align: center;
+    hr {
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+        margin: 2rem 0;
     }
-    .dashboard-title h1 { color: white !important; font-size: 2rem !important; margin: 0 !important; letter-spacing: -0.5px; }
-    .dashboard-title p { color: #94a3b8 !important; margin: 8px 0 0 0 !important; font-size: 0.95rem; }
+    
+    /* Hero title section */
+    .dashboard-title {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #312e81 100%);
+        padding: 48px 32px;
+        border-radius: 24px;
+        margin-bottom: 32px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+    
+    .dashboard-title::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 70%);
+        animation: pulse 4s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.1); opacity: 0.8; }
+    }
+    
+    .dashboard-title h1 {
+        color: white !important;
+        font-size: 2.5rem !important;
+        margin: 0 !important;
+        letter-spacing: -0.02em;
+        font-weight: 800 !important;
+        position: relative;
+        z-index: 1;
+        text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+    }
+    
+    .dashboard-title p {
+        color: #cbd5e1 !important;
+        margin: 16px 0 0 0 !important;
+        font-size: 1.1rem;
+        position: relative;
+        z-index: 1;
+        font-weight: 500;
+    }
+    
+    /* Info/warning/success boxes */
+    .stAlert {
+        border-radius: 12px;
+        border: none;
+        backdrop-filter: blur(10px);
+        animation: slideIn 0.4s ease;
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Dataframes */
+    .stDataFrame {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    }
+    
+    /* Input fields */
+    .stTextInput input, .stNumberInput input, .stSelectbox select {
+        border-radius: 10px;
+        border: 2px solid #e2e8f0;
+        transition: all 0.3s ease;
+    }
+    
+    .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox select:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+    
+    /* Sliders */
+    .stSlider {
+        padding: 8px 0;
+    }
+    
+    /* Checkbox and radio */
+    .stCheckbox, .stRadio {
+        transition: all 0.3s ease;
+    }
+    
+    /* File uploader */
+    section[data-testid="stFileUploadDropzone"] {
+        border-radius: 16px;
+        border: 2px dashed #cbd5e1;
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+    }
+    
+    section[data-testid="stFileUploadDropzone"]:hover {
+        border-color: #6366f1;
+        background: rgba(99, 102, 241, 0.05);
+    }
+    
+    /* Loading animation */
+    .stSpinner > div {
+        border-color: #6366f1 transparent transparent transparent !important;
+    }
+    
+    /* Subheaders */
+    .stMarkdown h2, .stMarkdown h3 {
+        color: #1e293b;
+        font-weight: 700;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        position: relative;
+        padding-left: 16px;
+    }
+    
+    .stMarkdown h2::before, .stMarkdown h3::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 4px;
+        height: 70%;
+        background: linear-gradient(180deg, #6366f1, #8b5cf6);
+        border-radius: 2px;
+    }
+    
+    /* Business context cards */
+    .business-card {
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(10px);
+        padding: 24px;
+        border-radius: 16px;
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+        height: 100%;
+    }
+    
+    .business-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
+    }
+    
+    /* Multiselect */
+    .stMultiSelect [data-baseweb="tag"] {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border-radius: 8px;
+        border: none;
+    }
+    
+    /* Caption text */
+    .stCaption {
+        font-size: 0.875rem;
+        color: #64748b;
+        font-weight: 500;
+    }
+    
+    /* Code blocks */
+    .stCodeBlock {
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# Hero section with animation
 st.markdown("""
 <div class="dashboard-title">
     <h1>📊 Business Analytics Dashboard</h1>
@@ -280,7 +597,7 @@ def infer_schema_description(column_name: str) -> str:
 
 def guess_export_date(text: str) -> str:
     month_match = re.search(
-        r"(January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2}\\s+\\d{4}",
+        r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s+\d{4}",
         text,
         flags=re.IGNORECASE,
     )
@@ -290,7 +607,7 @@ def guess_export_date(text: str) -> str:
         except Exception:
             return datetime.now().date().isoformat()
 
-    iso_match = re.search(r"\\d{4}-\\d{2}-\\d{2}", text)
+    iso_match = re.search(r"\d{4}-\d{2}-\d{2}", text)
     if iso_match:
         return iso_match.group(0)
 
@@ -440,7 +757,7 @@ def clean_text_columns(
         if trim_whitespace:
             series = series.str.strip()
         if remove_special_chars:
-            series = series.str.replace(r"[^0-9a-zA-Z\\s\\-\\.,:/()&]", "", regex=True)
+            series = series.str.replace(r"[^0-9a-zA-Z\s\-\.,:/()&]", "", regex=True)
 
         changed_cells += int((before != series).sum())
         out.loc[mask, col] = series
@@ -535,7 +852,7 @@ Interactive analytics dashboard for uploaded CSV files with business framing, fi
 
 ## Troubleshooting
 - If upload fails, confirm file is CSV and below 200MB.
-- If filters return no rows, click \"Clear all filters\".
+- If filters return no rows, click "Clear all filters".
 - If charts are empty, verify at least one numeric/categorical column exists.
 """
 
@@ -546,10 +863,10 @@ def apply_filters_sidebar(
     categorical_cols: list[str],
     datetime_cols: list[str],
 ) -> tuple[pd.DataFrame, list[str]]:
-    st.sidebar.header("Filters")
+    st.sidebar.header("🎯 Filters")
     st.sidebar.caption("Choose columns to filter. Each filter narrows the current cleaned dataset.")
 
-    if st.sidebar.button("Clear all filters", use_container_width=True):
+    if st.sidebar.button("🔄 Clear all filters", use_container_width=True):
         clear_filter_state()
         st.rerun()
 
@@ -831,7 +1148,7 @@ def build_html_report(summary: dict) -> str:
 <!doctype html>
 <html>
 <head>
-  <meta charset=\"utf-8\" />
+  <meta charset="utf-8" />
   <title>Analytics Summary Report</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 24px; line-height: 1.4; }}
@@ -842,7 +1159,7 @@ def build_html_report(summary: dict) -> str:
 <body>
   <h1>Analytics Summary Report</h1>
   <p>Generated: {summary['generated_at']}</p>
-  <div class=\"meta\">
+  <div class="meta">
     <p><b>Total rows:</b> {summary['dataset']['total_rows']}</p>
     <p><b>Filtered rows:</b> {summary['dataset']['filtered_rows']}</p>
     <p><b>Columns:</b> {summary['dataset']['columns']}</p>
@@ -872,34 +1189,69 @@ def build_html_report(summary: dict) -> str:
 """.strip()
 
 
-uploaded = st.file_uploader("Upload a CSV file", type=["csv"])
+# Modern Plotly theme
+def apply_modern_chart_theme(fig):
+    """Apply consistent modern styling to Plotly charts"""
+    fig.update_layout(
+        plot_bgcolor='rgba(255, 255, 255, 0.9)',
+        paper_bgcolor='rgba(0, 0, 0, 0)',
+        font=dict(family="Inter, sans-serif", color="#1e293b"),
+        title_font=dict(size=18, color="#1e293b", family="Inter"),
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=13,
+            font_family="Inter"
+        ),
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(226, 232, 240, 0.5)',
+        showline=True,
+        linewidth=1,
+        linecolor='rgba(226, 232, 240, 0.8)'
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='rgba(226, 232, 240, 0.5)',
+        showline=True,
+        linewidth=1,
+        linecolor='rgba(226, 232, 240, 0.8)'
+    )
+    return fig
+
+
+uploaded = st.file_uploader("📁 Upload a CSV file", type=["csv"])
 if uploaded is None:
-    st.info("Upload a CSV to begin.")
+    st.info("👆 Upload a CSV to begin your analytics journey")
     st.stop()
 
 if uploaded.size > MAX_UPLOAD_MB * 1024 * 1024:
-    st.error(f"File exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
+    st.error(f"❌ File exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
     st.stop()
 
 try:
-    raw_bytes = uploaded.getvalue()
-    data_raw, meta = read_csv_bytes(raw_bytes)
+    with st.spinner("🔄 Reading your data..."):
+        raw_bytes = uploaded.getvalue()
+        data_raw, meta = read_csv_bytes(raw_bytes)
 except Exception as exc:
-    st.error("Could not read this file as a CSV. Check delimiter, encoding, and file format.")
+    st.error("❌ Could not read this file as a CSV. Check delimiter, encoding, and file format.")
     st.exception(exc)
     st.stop()
 
 if data_raw is None or data_raw.shape[1] == 0:
-    st.error("This CSV has no columns. Upload a valid dataset.")
+    st.error("❌ This CSV has no columns. Upload a valid dataset.")
     st.stop()
 
 if data_raw.empty:
-    st.error("This CSV has no rows. Upload a non-empty dataset.")
+    st.error("❌ This CSV has no rows. Upload a non-empty dataset.")
     st.stop()
 
 data_raw = data_raw.dropna(how="all").copy()
 if data_raw.empty:
-    st.error("Your dataset has no usable rows after removing fully empty rows.")
+    st.error("❌ Your dataset has no usable rows after removing fully empty rows.")
     st.stop()
 
 data_raw, renamed_columns = make_unique_columns(data_raw)
@@ -920,15 +1272,15 @@ if st.session_state.get("dataset_token") != dataset_token:
 
 if renamed_columns:
     st.warning(
-        "Duplicate column names were detected and renamed with suffixes (example: __2, __3) to avoid ambiguity."
+        "⚠️ Duplicate column names were detected and renamed with suffixes (example: __2, __3) to avoid ambiguity."
     )
 
-st.sidebar.header("Data Cleaning")
+st.sidebar.header("🧹 Data Cleaning")
 st.sidebar.caption("Apply optional cleanup actions before filtering and visualization.")
 
 working_data = st.session_state["working_data"]
 
-if st.sidebar.button("Drop rows with missing values", use_container_width=True):
+if st.sidebar.button("🗑️ Drop rows with missing values", use_container_width=True):
     before = len(working_data)
     working_data = working_data.dropna().copy()
     removed = before - len(working_data)
@@ -936,7 +1288,7 @@ if st.sidebar.button("Drop rows with missing values", use_container_width=True):
         f"Dropped rows with missing values: {before:,} -> {len(working_data):,} (removed {removed:,})"
     )
 
-if st.sidebar.button("Remove duplicate rows", use_container_width=True):
+if st.sidebar.button("🔄 Remove duplicate rows", use_container_width=True):
     before = len(working_data)
     working_data = working_data.drop_duplicates().copy()
     removed = before - len(working_data)
@@ -944,7 +1296,7 @@ if st.sidebar.button("Remove duplicate rows", use_container_width=True):
         f"Removed duplicates: {before:,} -> {len(working_data):,} (removed {removed:,})"
     )
 
-with st.sidebar.expander("Fill missing values", expanded=False):
+with st.sidebar.expander("💉 Fill missing values", expanded=False):
     numeric_strategy = st.selectbox(
         "Numeric columns",
         options=["None", "Mean", "Median", "Mode", "Custom"],
@@ -974,7 +1326,7 @@ with st.sidebar.expander("Fill missing values", expanded=False):
             f"Filled missing values: {filled_cells:,} cell(s) updated"
         )
 
-with st.sidebar.expander("Data type conversion", expanded=False):
+with st.sidebar.expander("🔄 Data type conversion", expanded=False):
     convert_col = st.selectbox(
         "Column to convert",
         options=working_data.columns.tolist(),
@@ -1001,7 +1353,7 @@ with st.sidebar.expander("Data type conversion", expanded=False):
             f"Converted {convert_col} to {convert_target} ({after_non_null:,}/{before_non_null:,} non-null retained)"
         )
 
-with st.sidebar.expander("Text cleaning", expanded=False):
+with st.sidebar.expander("✨ Text cleaning", expanded=False):
     current_numeric, current_categorical, current_datetime, _ = column_types(working_data)
     text_cols = st.multiselect(
         "Columns",
@@ -1029,13 +1381,16 @@ st.session_state["working_data"] = working_data
 
 data = st.session_state["working_data"]
 if data.empty:
-    st.error("No rows remain after cleaning actions. Re-upload file or adjust cleaning options.")
+    st.error("❌ No rows remain after cleaning actions. Re-upload file or adjust cleaning options.")
     st.stop()
 
 numeric_cols, categorical_cols, datetime_cols, other_cols = column_types(data)
 filtered_data, filter_summaries = apply_filters_sidebar(data, numeric_cols, categorical_cols, datetime_cols)
 
-st.subheader("Business Question and Decision Context")
+st.markdown("### 🎯 Business Question and Decision Context")
+
+# Business context cards with modern styling
+st.markdown('<div style="margin-bottom: 1.5rem;">', unsafe_allow_html=True)
 use_case_templates = {
     "Custom": {
         "question": "How can driving behavior and route choices improve Tesla efficiency, battery use, and trip planning?",
@@ -1090,30 +1445,38 @@ template_choice = st.selectbox(
     key="biz_template_choice",
 )
 selected_template = use_case_templates[template_choice]
-st.markdown(f"This dashboard answers: **{selected_template['question']}**")
-st.caption(f"Recommended filters: {selected_template['recommended_filters']}")
-st.markdown("**Example questions answered**")
+st.markdown(f"**🎯 This dashboard answers:** {selected_template['question']}")
+st.caption(f"💡 Recommended filters: {selected_template['recommended_filters']}")
+
+st.markdown("**📋 Example questions answered**")
 for q in selected_template["questions_answered"]:
-    st.write(f"- {q}")
+    st.write(f"• {q}")
 
 c1, c2 = st.columns(2)
 with c1:
-    st.markdown("**Why this matters**")
+    st.markdown('<div class="business-card">', unsafe_allow_html=True)
+    st.markdown("**💡 Why this matters**")
     st.markdown(
-        "- Identify high-energy trips and routes\n"
-        "- Improve charging and route planning decisions\n"
-        "- Track consistency of driving efficiency over time"
+        "• Identify high-energy trips and routes\n"
+        "• Improve charging and route planning decisions\n"
+        "• Track consistency of driving efficiency over time"
     )
+    st.markdown('</div>', unsafe_allow_html=True)
 with c2:
-    st.markdown("**Business objectives**")
+    st.markdown('<div class="business-card">', unsafe_allow_html=True)
+    st.markdown("**🎯 Business objectives**")
     st.markdown(
-        "- Reduce average energy use (Wh/mi)\n"
-        "- Monitor battery drop per distance\n"
-        "- Identify frequent start/end route clusters"
+        "• Reduce average energy use (Wh/mi)\n"
+        "• Monitor battery drop per distance\n"
+        "• Identify frequent start/end route clusters"
     )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 kpis = calculate_business_kpis(filtered_data)
 if kpis:
+    st.markdown("### 📊 Key Performance Indicators")
     kpi_cols = st.columns(len(kpis))
     for idx, (label, value, help_text) in enumerate(kpis):
         kpi_cols[idx].metric(label, value, help=help_text)
@@ -1125,25 +1488,26 @@ removed_pct = (removed_rows / full_rows * 100) if full_rows else 0
 
 if filter_summaries:
     st.warning(
-        f"Viewing: {filtered_rows:,} of {full_rows:,} rows ({(filtered_rows / full_rows * 100):.1f}%). "
+        f"🔍 Viewing: {filtered_rows:,} of {full_rows:,} rows ({(filtered_rows / full_rows * 100):.1f}%). "
         f"Active filters: {', '.join(filter_summaries)}"
     )
     st.caption(f"Filtering removed {removed_rows:,} rows ({removed_pct:.1f}%).")
 else:
-    st.info(f"Viewing full cleaned dataset: {full_rows:,} rows. No active filters.")
+    st.info(f"✅ Viewing full cleaned dataset: {full_rows:,} rows. No active filters.")
 
 if filtered_rows == 0:
-    st.error("No data matches current filters. Use 'Clear all filters' or loosen filter values.")
+    st.error("❌ No data matches current filters. Use 'Clear all filters' or loosen filter values.")
 elif filtered_rows < max(10, int(0.05 * full_rows)):
-    st.warning("Current filters keep less than 5% of rows. Insights may be unstable due to low sample size.")
+    st.warning("⚠️ Current filters keep less than 5% of rows. Insights may be unstable due to low sample size.")
 
-if st.button("Clear all filters (global)", use_container_width=False):
+if st.button("🔄 Clear all filters (global)", use_container_width=False):
     clear_filter_state()
     st.rerun()
 
 dup_count = int(data.duplicated().sum())
 mem_mb = float(data.memory_usage(deep=True).sum() / (1024 * 1024))
 
+st.markdown("### 📈 Dataset Overview")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Rows (cleaned)", f"{len(data):,}")
 m2.metric("Rows (filtered)", f"{len(filtered_data):,}")
@@ -1151,7 +1515,7 @@ m3.metric("Columns", f"{data.shape[1]}")
 m4.metric("Duplicate rows", f"{dup_count:,}")
 
 st.caption(
-    "Loaded using encoding: {enc} (delimiter: {delim}). Memory: {mem:.2f} MB.".format(
+    "💾 Loaded using encoding: {enc} (delimiter: {delim}). Memory: {mem:.2f} MB.".format(
         enc=meta.get("encoding", "unknown"),
         delim=meta.get("delimiter", "unknown"),
         mem=mem_mb,
@@ -1159,18 +1523,18 @@ st.caption(
 )
 
 if st.session_state["cleaning_history"]:
-    with st.expander("Cleaning history", expanded=False):
+    with st.expander("📝 Cleaning history", expanded=False):
         for idx, item in enumerate(st.session_state["cleaning_history"], start=1):
             st.write(f"{idx}. {item}")
 
 st.divider()
 
 tab_overview, tab_explore, tab_viz, tab_compare, tab_findings, tab_export, tab_help = st.tabs(
-    ["Overview", "Explore", "Visualize", "Compare", "Findings", "Export", "Help"]
+    ["📊 Overview", "🔍 Explore", "📈 Visualize", "⚖️ Compare", "💡 Findings", "📥 Export", "❓ Help"]
 )
 
 with tab_overview:
-    st.subheader("Data Source and Provenance")
+    st.subheader("📋 Data Source and Provenance")
     p1, p2 = st.columns(2)
     with p1:
         st.text_input("Source system", key="src_system")
@@ -1181,6 +1545,7 @@ with tab_overview:
 
     st.text_area("Known data quality issues or limitations", key="src_limitations", height=80)
 
+    st.subheader("📑 Column Schema")
     schema_df = pd.DataFrame(
         {
             "column": data.columns,
@@ -1190,7 +1555,7 @@ with tab_overview:
     )
     st.dataframe(schema_df, use_container_width=True, height=220)
 
-    st.subheader("Data quality summary")
+    st.subheader("🔍 Data Quality Summary")
     left, right = st.columns([1.1, 0.9])
 
     with left:
@@ -1198,14 +1563,14 @@ with tab_overview:
         st.dataframe(overview, use_container_width=True, height=360)
 
     with right:
-        st.subheader("Numeric descriptive stats")
+        st.subheader("📊 Numeric Descriptive Stats")
         if numeric_cols:
             stats = numeric_stats(data, numeric_cols)
             st.dataframe(stats, use_container_width=True, height=360)
         else:
             st.info("No numeric columns detected.")
 
-    st.subheader("Missing data heatmap")
+    st.subheader("🗺️ Missing Data Heatmap")
     miss_matrix = data.head(500).isna().astype(int).T
     if miss_matrix.empty:
         st.info("No rows available for missing-data heatmap.")
@@ -1217,13 +1582,13 @@ with tab_overview:
             labels={"x": "Row index", "y": "Column", "color": "Missing"},
             title="Missing data pattern (first 500 rows)",
         )
-        miss_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), height=420)
+        miss_fig = apply_modern_chart_theme(miss_fig)
         st.plotly_chart(miss_fig, use_container_width=True)
 
 with tab_explore:
-    st.subheader("Filtered data preview")
+    st.subheader("🔍 Filtered Data Preview")
     if filtered_data.empty:
-        st.warning("No data matches your filters. Try adjusting filter criteria.")
+        st.warning("⚠️ No data matches your filters. Try adjusting filter criteria.")
     else:
         default_cols = filtered_data.columns.tolist()[: min(10, filtered_data.shape[1])]
         show_cols = st.multiselect(
@@ -1235,18 +1600,18 @@ with tab_explore:
 
 with tab_viz:
     if filtered_data.empty:
-        st.warning("No charts available because the filtered dataset is empty.")
+        st.warning("⚠️ No charts available because the filtered dataset is empty.")
     else:
         palette_choice = st.selectbox(
-            "Color palette",
+            "🎨 Color palette",
             options=["Plotly", "Safe", "Bold", "Dark24", "Set2"],
             index=0,
             key="viz_palette",
         )
         palette_sequence = get_palette_sequence(palette_choice)
-        log_histogram = st.toggle("Log scale histogram y-axis", value=False, key="viz_hist_log")
+        log_histogram = st.toggle("📊 Log scale histogram y-axis", value=False, key="viz_hist_log")
         bar_mode = st.selectbox(
-            "Bar layout mode",
+            "📊 Bar layout mode",
             options=["group", "stack"],
             index=0,
             key="viz_bar_mode",
@@ -1256,7 +1621,7 @@ with tab_viz:
         v1, v2 = st.columns(2)
 
         with v1:
-            st.subheader("Histogram (numeric)")
+            st.subheader("📊 Histogram (numeric)")
             if numeric_cols:
                 hist_col = st.selectbox("Numeric column", options=numeric_cols, index=0, key="viz_hist_col")
                 bins = st.slider("Bins", min_value=5, max_value=80, value=30, key="viz_hist_bins")
@@ -1283,14 +1648,14 @@ with tab_viz:
                 )
                 if log_histogram:
                     hist_fig.update_yaxes(type="log")
-                hist_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+                hist_fig = apply_modern_chart_theme(hist_fig)
                 st.plotly_chart(hist_fig, use_container_width=True)
                 st.caption(sample_size_label(data, filtered_data, datetime_cols))
             else:
                 st.info("No numeric columns available for a histogram.")
 
         with v2:
-            st.subheader("Bar chart (categorical)")
+            st.subheader("📊 Bar Chart (categorical)")
             if categorical_cols:
                 cat_col = st.selectbox("Categorical column", options=categorical_cols, index=0, key="viz_bar_cat")
                 split_options = ["(None)"] + [c for c in categorical_cols if c != cat_col]
@@ -1356,27 +1721,28 @@ with tab_viz:
                         color_discrete_sequence=palette_sequence,
                     )
 
-                bar_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
                 if as_percent:
                     bar_fig.update_yaxes(ticksuffix="%")
+                bar_fig = apply_modern_chart_theme(bar_fig)
                 st.plotly_chart(bar_fig, use_container_width=True)
                 st.caption(sample_size_label(data, filtered_data, datetime_cols))
             else:
                 st.info("No categorical columns available for a bar chart.")
 
         st.divider()
-        st.subheader("Correlation (numeric)")
+        st.subheader("🔗 Correlation (numeric)")
         if len(numeric_cols) >= 2:
             corr = filtered_data[numeric_cols].corr(numeric_only=True)
-            corr_fig = px.imshow(corr, text_auto=".2f", title="Correlation heatmap (filtered view)")
-            corr_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+            corr_fig = px.imshow(corr, text_auto=".2f", title="Correlation heatmap (filtered view)",
+                               color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
+            corr_fig = apply_modern_chart_theme(corr_fig)
             st.plotly_chart(corr_fig, use_container_width=True)
             st.caption(sample_size_label(data, filtered_data, datetime_cols))
         else:
             st.info("Need at least 2 numeric columns for a correlation heatmap.")
 
         st.divider()
-        st.subheader("Time series (if dates are available)")
+        st.subheader("📈 Time Series (if dates are available)")
         if datetime_cols and numeric_cols:
             t1, t2, t3 = st.columns([0.38, 0.38, 0.24])
             with t1:
@@ -1409,14 +1775,15 @@ with tab_viz:
                     title=f"{agg.title()} of {val_col} over time ({freq})",
                     color_discrete_sequence=palette_sequence,
                 )
-                ts_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+                ts_fig.update_traces(line=dict(width=3))
+                ts_fig = apply_modern_chart_theme(ts_fig)
                 st.plotly_chart(ts_fig, use_container_width=True)
                 st.caption(sample_size_label(data, filtered_data, datetime_cols))
         else:
             st.info("Time series requires at least one datetime and one numeric column.")
 
         st.divider()
-        st.subheader("Scatter explorer")
+        st.subheader("🔬 Scatter Explorer")
         if len(numeric_cols) >= 2:
             sc1, sc2, sc3 = st.columns([0.4, 0.4, 0.2])
             with sc1:
@@ -1438,16 +1805,17 @@ with tab_viz:
                     title=f"{y_col} vs {x_col}",
                     color_discrete_sequence=palette_sequence,
                 )
-                scatter_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+                scatter_fig.update_traces(marker=dict(size=8, opacity=0.6))
+                scatter_fig = apply_modern_chart_theme(scatter_fig)
                 st.plotly_chart(scatter_fig, use_container_width=True)
                 st.caption(f"Scatter sample size: n = {len(scatter_df):,}")
         else:
             st.info("Need at least two numeric columns for scatter exploration.")
 
 with tab_compare:
-    st.subheader("Comparison and Benchmarking")
+    st.subheader("⚖️ Comparison and Benchmarking")
     if filtered_data.empty:
-        st.warning("No comparison available because filtered data is empty.")
+        st.warning("⚠️ No comparison available because filtered data is empty.")
     else:
         st.caption(sample_size_label(data, filtered_data, datetime_cols))
 
@@ -1479,11 +1847,11 @@ with tab_compare:
                 title="Filtered vs full means (top 10 metrics)",
                 color_discrete_sequence=get_palette_sequence("Safe"),
             )
-            comp_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+            comp_fig = apply_modern_chart_theme(comp_fig)
             st.plotly_chart(comp_fig, use_container_width=True)
 
         st.divider()
-        st.subheader("Time period comparison")
+        st.subheader("📅 Time Period Comparison")
         if datetime_cols and numeric_cols:
             pc1, pc2, pc3 = st.columns([0.4, 0.4, 0.2])
             with pc1:
@@ -1525,13 +1893,14 @@ with tab_compare:
                     title=f"Mean {period_metric_col} over time: filtered vs full",
                     color_discrete_sequence=get_palette_sequence("Bold"),
                 )
-                time_fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+                time_fig.update_traces(line=dict(width=3))
+                time_fig = apply_modern_chart_theme(time_fig)
                 st.plotly_chart(time_fig, use_container_width=True)
         else:
             st.info("Need one datetime and one numeric column for time period comparison.")
 
         st.divider()
-        st.subheader("Benchmark target tracking")
+        st.subheader("🎯 Benchmark Target Tracking")
         if numeric_cols:
             b1, b2, b3 = st.columns([0.35, 0.35, 0.3])
             with b1:
@@ -1560,27 +1929,27 @@ with tab_compare:
                 status_line = f"Current mean {benchmark_col}: {current_metric:.3g}. Gap to target: {gap:.3g}."
 
             if met_target:
-                st.success(f"Target met. {status_line}")
+                st.success(f"✅ Target met. {status_line}")
             else:
-                st.warning(f"Target not yet met. {status_line}")
+                st.warning(f"⚠️ Target not yet met. {status_line}")
         else:
             st.info("No numeric columns available for benchmark tracking.")
 
 with tab_findings:
-    st.subheader("Top Insights")
+    st.subheader("💡 Top Insights")
     insights = generate_findings(data, filtered_data, numeric_cols, categorical_cols, datetime_cols)
     for idx, insight in enumerate(insights, start=1):
-        st.write(f"{idx}. {insight}")
-    st.caption("Insights are heuristic and intended to accelerate exploratory analysis.")
+        st.write(f"**{idx}.** {insight}")
+    st.caption("💡 Insights are heuristic and intended to accelerate exploratory analysis.")
 
 with tab_export:
-    st.subheader("Export")
+    st.subheader("📥 Export")
     if filtered_data.empty:
-        st.warning("Filtered dataset is empty, so there is nothing to export.")
+        st.warning("⚠️ Filtered dataset is empty, so there is nothing to export.")
     else:
         csv_bytes = filtered_data.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="Download filtered CSV",
+            label="📥 Download filtered CSV",
             data=csv_bytes,
             file_name="filtered_data.csv",
             mime="text/csv",
@@ -1609,50 +1978,51 @@ with tab_export:
         summary_html = build_html_report(summary)
 
         st.download_button(
-            label="Download analysis summary (JSON)",
+            label="📥 Download analysis summary (JSON)",
             data=summary_json,
             file_name="analysis_summary.json",
             mime="application/json",
         )
         st.download_button(
-            label="Download analysis summary (HTML)",
+            label="📥 Download analysis summary (HTML)",
             data=summary_html,
             file_name="analysis_summary.html",
             mime="text/html",
         )
         st.download_button(
-            label="Download README template",
+            label="📥 Download README template",
             data=build_readme_text(),
             file_name="README.md",
             mime="text/markdown",
         )
 
         st.caption(
-            f"Export includes {len(filtered_data):,} rows, {filtered_data.shape[1]} columns, and a narrative summary."
+            f"📦 Export includes {len(filtered_data):,} rows, {filtered_data.shape[1]} columns, and a narrative summary."
         )
 
 with tab_help:
-    st.subheader("How to use this dashboard")
+    st.subheader("❓ How to Use This Dashboard")
     st.markdown(
-        "1. Upload CSV.\n"
-        "2. Optionally clean data from the sidebar.\n"
-        "3. Apply filters for categorical, numeric, and date columns.\n"
-        "4. Review KPIs, visualizations, findings, and comparisons.\n"
-        "5. Export filtered data and summary artifacts."
+        "1. 📁 **Upload CSV** - Start by uploading your data file\n"
+        "2. 🧹 **Clean data** - Optionally clean data from the sidebar\n"
+        "3. 🎯 **Apply filters** - Filter categorical, numeric, and date columns\n"
+        "4. 📊 **Review insights** - Explore KPIs, visualizations, findings, and comparisons\n"
+        "5. 📥 **Export** - Download filtered data and summary artifacts"
     )
-    st.markdown("**Keyboard-friendly tips**")
-    st.write("- Press `/` then type widget labels to jump quickly in browser search.")
-    st.write("- Use the clear-filter buttons when no rows match.")
-    st.write("- Keep filters narrow for focused insights, broad for trend analysis.")
+    st.markdown("**⌨️ Keyboard-friendly tips**")
+    st.write("• Press `/` then type widget labels to jump quickly in browser search")
+    st.write("• Use the clear-filter buttons when no rows match")
+    st.write("• Keep filters narrow for focused insights, broad for trend analysis")
 
-    st.markdown("**Expected input**")
-    st.write("- CSV with headers")
-    st.write("- Mixed data types are supported")
-    st.write("- Datetime columns are auto-detected when parse confidence is high")
+    st.markdown("**📋 Expected input**")
+    st.write("• CSV with headers")
+    st.write("• Mixed data types are supported")
+    st.write("• Datetime columns are auto-detected when parse confidence is high")
 
-    st.markdown("**Troubleshooting**")
-    st.write("- Upload errors: verify file is CSV and below 200MB")
-    st.write("- Empty charts: verify required numeric/categorical columns exist")
-    st.write("- Unexpected results: review cleaning history and active filters")
+    st.markdown("**🔧 Troubleshooting**")
+    st.write("• Upload errors: verify file is CSV and below 200MB")
+    st.write("• Empty charts: verify required numeric/categorical columns exist")
+    st.write("• Unexpected results: review cleaning history and active filters")
 
-    st.code(build_readme_text(), language="markdown")
+    with st.expander("📖 View README", expanded=False):
+        st.code(build_readme_text(), language="markdown")
