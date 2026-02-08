@@ -298,9 +298,35 @@ def get_gemini_key() -> str | None:
 
 
 def init_gemini(api_key: str):
-    """Configure and return a Gemini generative model."""
+    """Configure Gemini and return a working model (tries multiple models)."""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+
+    # Try models in order: newest stable free-tier first, then fallbacks
+    model_candidates = [
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-3-flash-preview",
+    ]
+
+    # If we already found a working model in this session, reuse it
+    cached = st.session_state.get("_gemini_model_name")
+    if cached:
+        return genai.GenerativeModel(cached)
+
+    # Probe each model with a tiny request
+    for name in model_candidates:
+        try:
+            model = genai.GenerativeModel(name)
+            model.generate_content("Hi", generation_config={"max_output_tokens": 5})
+            st.session_state["_gemini_model_name"] = name
+            return model
+        except Exception:
+            continue
+
+    # Last resort: just return the first candidate and let the caller handle errors
+    return genai.GenerativeModel(model_candidates[0])
 
 
 def build_gemini_context(
