@@ -13,9 +13,95 @@ import streamlit as st
 
 MAX_UPLOAD_MB = 200
 
-st.set_page_config(page_title="Local Business Analytics Dashboard", page_icon="📊", layout="wide")
-st.title("Local Business Analytics Dashboard")
-st.caption("Upload a CSV to explore business context, data quality, filters, insights, and exports.")
+st.set_page_config(page_title="Business Analytics Dashboard", page_icon="📊", layout="wide")
+
+# Custom UI theme
+st.markdown("""
+<style>
+    /* Dark header bar */
+    header[data-testid="stHeader"] { background: linear-gradient(90deg, #0b0f1a 0%, #1a1033 100%); }
+
+    /* Main background */
+    .stApp { background: #f8fafc; }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0b0f1a 0%, #111827 100%);
+        color: #e2e8f0;
+    }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stCaption, section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span { color: #cbd5e1 !important; }
+    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; }
+    section[data-testid="stSidebar"] .stButton > button {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: white; border: none; border-radius: 8px;
+        font-weight: 600; transition: all 0.3s ease;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: linear-gradient(135deg, #818cf8, #a78bfa);
+        transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+    }
+
+    /* Metric cards */
+    div[data-testid="stMetric"] {
+        background: white; padding: 16px 20px; border-radius: 12px;
+        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        transition: all 0.3s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        border-color: rgba(99,102,241,0.3); transform: translateY(-2px);
+    }
+    div[data-testid="stMetric"] label { color: #64748b !important; font-weight: 600 !important; }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #1e293b !important; font-weight: 700 !important; }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 4px; }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0; padding: 10px 20px;
+        font-weight: 600; color: #64748b;
+    }
+    .stTabs [aria-selected="true"] {
+        background: white; color: #6366f1 !important;
+        border-bottom: 3px solid #6366f1;
+    }
+
+    /* Download buttons */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: white; border: none; border-radius: 8px;
+        font-weight: 600; padding: 8px 20px;
+    }
+    .stDownloadButton > button:hover {
+        background: linear-gradient(135deg, #818cf8, #a78bfa);
+        transform: translateY(-1px);
+    }
+
+    /* Expanders */
+    .streamlit-expanderHeader { font-weight: 600; color: #1e293b; }
+
+    /* Dividers */
+    hr { border-color: #e2e8f0 !important; }
+
+    /* Title styling */
+    .dashboard-title {
+        background: linear-gradient(135deg, #0b0f1a, #1a1033);
+        padding: 32px; border-radius: 16px; margin-bottom: 24px;
+        text-align: center;
+    }
+    .dashboard-title h1 { color: white !important; font-size: 2rem !important; margin: 0 !important; letter-spacing: -0.5px; }
+    .dashboard-title p { color: #94a3b8 !important; margin: 8px 0 0 0 !important; font-size: 0.95rem; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="dashboard-title">
+    <h1>📊 Business Analytics Dashboard</h1>
+    <p>Upload a CSV to explore business context, data quality, filters, insights, and exports.</p>
+</div>
+""", unsafe_allow_html=True)
 
 
 def safe_widget_key(value: str) -> str:
