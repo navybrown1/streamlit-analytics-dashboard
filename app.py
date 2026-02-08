@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import warnings
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# AI / ML imports (safe fallbacks)
+try:
+    import google.generativeai as genai
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+
+try:
+    from sklearn.ensemble import IsolationForest
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 # =============================================================================
 # 1. CONFIGURATION & THEME
@@ -260,6 +275,155 @@ st.markdown("""
 # =============================================================================
 # 2. HELPER FUNCTIONS
 # =============================================================================
+
+# =============================================================================
+# 2a. AI / ML HELPER FUNCTIONS
+# =============================================================================
+
+def get_gemini_key() -> str | None:
+    """Resolve Gemini API key from secrets, env, or session state."""
+    # 1. Streamlit secrets (Streamlit Cloud)
+    try:
+        key = st.secrets.get("GOOGLE_API_KEY", "")
+        if key:
+            return key
+    except Exception:
+        pass
+    # 2. Environment variable
+    key = os.environ.get("GOOGLE_API_KEY", "")
+    if key:
+        return key
+    # 3. Session state (sidebar input)
+    return st.session_state.get("user_gemini_key", "")
+
+
+def init_gemini(api_key: str):
+    """Configure and return a Gemini generative model."""
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel("gemini-2.0-flash")
+
+
+def build_gemini_context(
+    df: pd.DataFrame,
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    datetime_cols: list[str],
+    filter_summaries: list[str],
+    kpis: list[tuple[str, str, str]],
+) -> str:
+    """Build a concise data context string for the LLM (no raw data sent)."""
+    lines: list[str] = []
+    lines.append(f"Dataset: {df.shape[0]:,} rows x {df.shape[1]} columns.")
+    lines.append(f"Numeric columns: {', '.join(numeric_cols) if numeric_cols else 'none'}")
+    lines.append(f"Categorical columns: {', '.join(categorical_cols) if categorical_cols else 'none'}")
+    lines.append(f"Datetime columns: {', '.join(datetime_cols) if datetime_cols else 'none'}")
+
+    if filter_summaries:
+        lines.append(f"Active filters: {'; '.join(filter_summaries)}")
+    else:
+        lines.append("No filters active — viewing full dataset.")
+
+    # Summary stats
+    if numeric_cols:
+        desc = df[numeric_cols].describe().round(2).to_string()
+        lines.append(f"\nNumeric summary:\n{desc}")
+
+    # KPIs
+    if kpis:
+        lines.append("\nKey Performance Indicators:")
+        for label, value, helptext in kpis:
+            lines.append(f"  - {label}: {value} ({helptext})")
+
+    # Sample rows (max 5)
+    sample = df.head(5).to_string(index=False)
+    lines.append(f"\nSample rows (first 5):\n{sample}")
+
+    # Missing data summary
+    miss = df.isna().sum()
+    miss_nonzero = miss[miss > 0]
+    if not miss_nonzero.empty:
+        lines.append(f"\nMissing values: {miss_nonzero.to_dict()}")
+
+    return "\n".join(lines)
+
+
+def run_anomaly_detection(
+    df: pd.DataFrame, columns: list[str], contamination: float = 0.05
+) -> tuple[pd.DataFrame, int]:
+    """Run Isolation Forest on selected columns. Returns df with anomaly flag."""
+    subset = df[columns].dropna()
+    if subset.shape[0] < 10:
+        return df.assign(_anomaly=False), 0
+
+    iso = IsolationForest(contamination=contamination, random_state=42, n_jobs=-1)
+    preds = iso.fit_predict(subset)
+    # -1 = anomaly, 1 = normal
+    anomaly_flags = pd.Series(False, index=df.index)
+    anomaly_flags.loc[subset.index] = preds == -1
+
+    result = df.copy()
+    result["_anomaly"] = anomaly_flags
+    anomaly_count = int(anomaly_flags.sum())
+    return result, anomaly_count
+
+
+def forecast_trend(
+    df: pd.DataFrame, dt_col: str, val_col: str, periods: int = 12, degree: int = 1
+) -> tuple[pd.DataFrame, float]:
+    """
+    Fit polynomial regression on time series and forecast ahead.
+    Returns forecast DataFrame and R-squared score.
+    """
+    ts = df[[dt_col, val_col]].dropna().sort_values(dt_col).copy()
+    if ts.shape[0] < 5:
+        return pd.DataFrame(), 0.0
+
+    # Convert dates to numeric (days since first date)
+    ts["_days"] = (ts[dt_col] - ts[dt_col].min()).dt.total_seconds() / 86400.0
+    x = ts["_days"].values
+    y = ts[val_col].values
+
+    # Fit polynomial
+    coeffs = np.polyfit(x, y, degree)
+    poly = np.poly1d(coeffs)
+    y_pred = poly(x)
+
+    # R-squared
+    ss_res = np.sum((y - y_pred) ** 2)
+    ss_tot = np.sum((y - np.mean(y)) ** 2)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    # Residual std for confidence band
+    residual_std = float(np.std(y - y_pred))
+
+    # Historical fitted
+    hist = pd.DataFrame({
+        dt_col: ts[dt_col].values,
+        "actual": y,
+        "fitted": y_pred,
+        "type": "Historical",
+    })
+
+    # Future forecast
+    last_date = ts[dt_col].max()
+    avg_gap = np.median(np.diff(x)) if len(x) > 1 else 1.0
+    future_days = np.array([x[-1] + avg_gap * (i + 1) for i in range(periods)])
+    future_dates = [last_date + pd.Timedelta(days=float(d - x[-1])) for d in future_days]
+    future_vals = poly(future_days)
+
+    forecast = pd.DataFrame({
+        dt_col: future_dates,
+        "actual": [np.nan] * periods,
+        "fitted": future_vals,
+        "type": "Forecast",
+    })
+
+    combined = pd.concat([hist, forecast], ignore_index=True)
+    combined["lower"] = combined["fitted"] - 1.96 * residual_std
+    combined["upper"] = combined["fitted"] + 1.96 * residual_std
+
+    return combined, r_squared
+
 
 def update_chart_design(fig, height=400):
     """Apply consistent clean Plotly styling."""
@@ -1085,9 +1249,28 @@ if renamed_columns:
     st.toast(f"Renamed {len(renamed_columns)} duplicate column(s) to avoid ambiguity", icon="⚠️")
 
 # =============================================================================
-# 4. SIDEBAR CLEANING TOOLS
+# 4. SIDEBAR: AI CONFIG + CLEANING TOOLS
 # =============================================================================
 
+st.sidebar.markdown("## 🤖 AI Configuration")
+if HAS_GEMINI:
+    _existing_key = get_gemini_key()
+    if _existing_key:
+        st.sidebar.success("Gemini API key detected", icon="✅")
+    else:
+        _user_key = st.sidebar.text_input(
+            "Google Gemini API key",
+            type="password",
+            key="sidebar_gemini_key_input",
+            help="Get a free key at https://aistudio.google.com/apikey",
+        )
+        if _user_key:
+            st.session_state["user_gemini_key"] = _user_key
+            st.rerun()
+else:
+    st.sidebar.caption("Install `google-generativeai` to enable AI chat & reports.")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("## 🧹 Data Cleaning")
 st.sidebar.caption("Apply optional cleanup before filtering and visualization.")
 working_data = st.session_state["working_data"]
@@ -1320,8 +1503,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 6. TABS
 # =============================================================================
 
-tab_overview, tab_explore, tab_viz, tab_compare, tab_findings, tab_export, tab_help = st.tabs(
-    ["📋 Overview", "🔎 Explore", "📊 Visualize", "⚖️ Compare", "💡 Findings", "📥 Export", "❓ Help"]
+tab_overview, tab_explore, tab_viz, tab_compare, tab_findings, tab_ai, tab_export, tab_help = st.tabs(
+    ["📋 Overview", "🔎 Explore", "📊 Visualize", "⚖️ Compare", "💡 Findings", "🤖 AI Analysis", "📥 Export", "❓ Help"]
 )
 
 # ---------- OVERVIEW ----------
@@ -1684,6 +1867,299 @@ with tab_findings:
     for idx, insight in enumerate(insights, start=1):
         st.write(f"**{idx}.** {insight}")
     st.caption("Insights are heuristic and intended to accelerate exploratory analysis.")
+
+# ---------- AI ANALYSIS ----------
+with tab_ai:
+    st.subheader("AI-Powered Analysis")
+    gemini_key = get_gemini_key() if HAS_GEMINI else ""
+    gemini_ready = bool(HAS_GEMINI and gemini_key)
+
+    if not HAS_GEMINI:
+        st.info("The `google-generativeai` package is not installed. AI chat and report features are unavailable, but anomaly detection and forecasting work below.")
+    elif not gemini_key:
+        st.info("Enter your Google Gemini API key in the sidebar to unlock AI chat and auto-reports. Anomaly detection and forecasting work without a key.")
+
+    # Build context for Gemini (used by both chat and report)
+    ai_context = build_gemini_context(
+        filtered_data, numeric_cols, categorical_cols, datetime_cols, filter_summaries, kpis,
+    )
+
+    # ---- 1. CHAT WITH YOUR DATA ----
+    st.markdown("### 💬 Chat With Your Data")
+    if gemini_ready:
+        st.caption(
+            "Ask questions about your data in plain English. "
+            "Only column names, summary stats, and 5 sample rows are sent to the AI — never the full dataset."
+        )
+
+        # Initialize chat history
+        if "ai_chat_history" not in st.session_state:
+            st.session_state["ai_chat_history"] = []
+
+        # Display chat history
+        for msg in st.session_state["ai_chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Chat input
+        user_question = st.chat_input("Ask about your data... e.g. 'Which routes use the most energy?'")
+        if user_question:
+            st.session_state["ai_chat_history"].append({"role": "user", "content": user_question})
+            with st.chat_message("user"):
+                st.markdown(user_question)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        model = init_gemini(gemini_key)
+                        system_prompt = (
+                            "You are a data analyst assistant embedded in a business analytics dashboard. "
+                            "Answer questions about the user's dataset concisely and accurately. "
+                            "Use the data context provided. Format responses with markdown. "
+                            "If you cannot determine something from the data, say so.\n\n"
+                            f"DATA CONTEXT:\n{ai_context}"
+                        )
+                        # Build conversation for multi-turn
+                        messages = [{"role": "user", "parts": [system_prompt]}]
+                        messages.append({"role": "model", "parts": ["Understood. I have your dataset context. Ask me anything about your data."]})
+                        for past in st.session_state["ai_chat_history"][:-1]:
+                            role = "user" if past["role"] == "user" else "model"
+                            messages.append({"role": role, "parts": [past["content"]]})
+                        messages.append({"role": "user", "parts": [user_question]})
+
+                        chat = model.start_chat(history=messages[:-1])
+                        response = chat.send_message(user_question)
+                        answer = response.text
+                    except Exception as e:
+                        answer = f"Error communicating with Gemini: {e}"
+
+                st.markdown(answer)
+                st.session_state["ai_chat_history"].append({"role": "assistant", "content": answer})
+
+        if st.session_state.get("ai_chat_history"):
+            if st.button("Clear chat history", key="ai_clear_chat"):
+                st.session_state["ai_chat_history"] = []
+                st.rerun()
+    else:
+        st.caption("Configure your Gemini API key in the sidebar to enable data chat.")
+
+    st.divider()
+
+    # ---- 2. AUTO-GENERATED REPORT ----
+    st.markdown("### 📝 AI-Generated Report")
+    if gemini_ready:
+        st.caption("One-click narrative analysis of your current dataset and filters.")
+
+        if st.button("Generate AI Report", key="ai_gen_report", type="primary"):
+            with st.spinner("Generating narrative report..."):
+                try:
+                    model = init_gemini(gemini_key)
+
+                    # Include existing findings
+                    findings_list = generate_findings(
+                        data, filtered_data, numeric_cols, categorical_cols, datetime_cols
+                    )
+                    findings_text = "\n".join(f"- {f}" for f in findings_list)
+
+                    report_prompt = (
+                        "You are a senior data analyst. Write a professional narrative report about the following dataset. "
+                        "Structure it with these sections:\n"
+                        "1. **Executive Summary** (2-3 sentences)\n"
+                        "2. **Data Overview** (schema, quality, completeness)\n"
+                        "3. **Key Findings** (the most important patterns)\n"
+                        "4. **Anomalies & Concerns** (data quality issues or unusual patterns)\n"
+                        "5. **Recommendations** (actionable next steps)\n\n"
+                        "Be specific with numbers. Use markdown formatting.\n\n"
+                        f"DATA CONTEXT:\n{ai_context}\n\n"
+                        f"AUTOMATED FINDINGS:\n{findings_text}"
+                    )
+                    response = model.generate_content(report_prompt)
+                    report_text = response.text
+                    st.session_state["ai_report"] = report_text
+                except Exception as e:
+                    st.error(f"Report generation failed: {e}")
+
+        if st.session_state.get("ai_report"):
+            st.markdown(st.session_state["ai_report"])
+            st.download_button(
+                "Download AI Report (.md)",
+                st.session_state["ai_report"],
+                "ai_analysis_report.md",
+                "text/markdown",
+                use_container_width=True,
+            )
+    else:
+        st.caption("Configure your Gemini API key in the sidebar to generate AI reports.")
+
+    st.divider()
+
+    # ---- 3. ANOMALY DETECTION ----
+    st.markdown("### 🔍 Anomaly Detection")
+    if HAS_SKLEARN:
+        st.caption("Uses Isolation Forest to flag unusual data points. No API key required.")
+
+        if numeric_cols and not filtered_data.empty:
+            anom_cols = st.multiselect(
+                "Select numeric columns to scan",
+                options=numeric_cols,
+                default=numeric_cols[:min(3, len(numeric_cols))],
+                key="ai_anom_cols",
+            )
+            anom_sensitivity = st.slider(
+                "Sensitivity (expected anomaly %)",
+                min_value=1, max_value=20, value=5, step=1,
+                key="ai_anom_sensitivity",
+                help="Higher = more points flagged as anomalies",
+            )
+
+            if anom_cols and st.button("Run Anomaly Detection", key="ai_run_anom"):
+                with st.spinner("Scanning for anomalies..."):
+                    anom_df, anom_count = run_anomaly_detection(
+                        filtered_data, anom_cols, contamination=anom_sensitivity / 100.0
+                    )
+                    st.session_state["anom_result"] = anom_df
+                    st.session_state["anom_count"] = anom_count
+                    st.session_state["anom_cols_used"] = anom_cols
+
+            if st.session_state.get("anom_result") is not None and st.session_state.get("anom_count", 0) > 0:
+                anom_df = st.session_state["anom_result"]
+                anom_count = st.session_state["anom_count"]
+                anom_cols_used = st.session_state.get("anom_cols_used", [])
+                total = len(anom_df)
+                anom_pct = (anom_count / total * 100) if total else 0
+
+                am1, am2, am3 = st.columns(3)
+                am1.metric("Anomalies Detected", f"{anom_count:,}")
+                am2.metric("Anomaly Rate", f"{anom_pct:.1f}%")
+                am3.metric("Normal Points", f"{total - anom_count:,}")
+
+                # Scatter plot if 2+ columns
+                if len(anom_cols_used) >= 2:
+                    scatter_anom = anom_df.copy()
+                    scatter_anom["Status"] = scatter_anom["_anomaly"].map({True: "Anomaly", False: "Normal"})
+                    anom_fig = px.scatter(
+                        scatter_anom.head(2000),
+                        x=anom_cols_used[0], y=anom_cols_used[1],
+                        color="Status",
+                        color_discrete_map={"Normal": "#6366f1", "Anomaly": "#ef4444"},
+                        title=f"Anomalies: {anom_cols_used[0]} vs {anom_cols_used[1]}",
+                        opacity=0.7,
+                    )
+                    anom_fig.update_traces(
+                        marker=dict(size=8),
+                        selector=dict(name="Anomaly"),
+                    )
+                    st.plotly_chart(update_chart_design(anom_fig), use_container_width=True)
+
+                # Show anomaly rows
+                with st.expander(f"View {anom_count} anomalous rows", expanded=False):
+                    anomalous_rows = anom_df[anom_df["_anomaly"]].drop(columns=["_anomaly"])
+                    st.dataframe(anomalous_rows, use_container_width=True, height=300)
+
+                    csv_anom = anomalous_rows.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "Download anomalies CSV", csv_anom,
+                        "anomalies.csv", "text/csv", use_container_width=True,
+                    )
+            elif st.session_state.get("anom_count") == 0 and st.session_state.get("anom_result") is not None:
+                st.success("No anomalies detected at the current sensitivity level.")
+        else:
+            st.info("Need numeric columns and data to run anomaly detection.")
+    else:
+        st.info("Install `scikit-learn` to enable anomaly detection.")
+
+    st.divider()
+
+    # ---- 4. TREND FORECASTING ----
+    st.markdown("### 📈 Trend Forecasting")
+    st.caption("Polynomial regression forecast with confidence bands. No API key required.")
+
+    if datetime_cols and numeric_cols and not filtered_data.empty:
+        fc1, fc2, fc3, fc4 = st.columns([0.3, 0.3, 0.2, 0.2])
+        with fc1:
+            fc_dt_col = st.selectbox("Date column", options=datetime_cols, index=0, key="ai_fc_dt")
+        with fc2:
+            fc_val_col = st.selectbox("Metric to forecast", options=numeric_cols, index=0, key="ai_fc_val")
+        with fc3:
+            fc_periods = st.slider("Forecast periods", 4, 52, 12, key="ai_fc_periods")
+        with fc4:
+            fc_degree = st.selectbox("Trend type", options=[1, 2, 3], format_func=lambda d: {1: "Linear", 2: "Quadratic", 3: "Cubic"}[d], key="ai_fc_degree")
+
+        if st.button("Run Forecast", key="ai_run_fc"):
+            with st.spinner("Forecasting..."):
+                fc_result, r_sq = forecast_trend(
+                    filtered_data, fc_dt_col, fc_val_col,
+                    periods=fc_periods, degree=fc_degree,
+                )
+                if fc_result.empty:
+                    st.warning("Not enough data points to forecast (need at least 5).")
+                else:
+                    st.session_state["fc_result"] = fc_result
+                    st.session_state["fc_r_squared"] = r_sq
+                    st.session_state["fc_dt_col"] = fc_dt_col
+                    st.session_state["fc_val_col"] = fc_val_col
+
+        if st.session_state.get("fc_result") is not None and not st.session_state["fc_result"].empty:
+            fc_result = st.session_state["fc_result"]
+            r_sq = st.session_state["fc_r_squared"]
+            fc_dt = st.session_state["fc_dt_col"]
+            fc_val = st.session_state["fc_val_col"]
+
+            fm1, fm2, fm3 = st.columns(3)
+            fm1.metric("R-squared", f"{r_sq:.3f}")
+            trend_dir = "Upward" if fc_result["fitted"].iloc[-1] > fc_result["fitted"].iloc[0] else "Downward"
+            fm2.metric("Trend Direction", trend_dir)
+            fm3.metric("Forecast Periods", f"{fc_periods}")
+
+            # Build the chart
+            fc_fig = go.Figure()
+
+            # Historical actual values
+            hist = fc_result[fc_result["type"] == "Historical"]
+            fc_fig.add_trace(go.Scatter(
+                x=hist[fc_dt], y=hist["actual"],
+                mode="markers", name="Actual",
+                marker=dict(color="#6366f1", size=6, opacity=0.6),
+            ))
+
+            # Fitted line (historical)
+            fc_fig.add_trace(go.Scatter(
+                x=hist[fc_dt], y=hist["fitted"],
+                mode="lines", name="Fitted",
+                line=dict(color="#10b981", width=2),
+            ))
+
+            # Forecast line
+            fcast = fc_result[fc_result["type"] == "Forecast"]
+            fc_fig.add_trace(go.Scatter(
+                x=fcast[fc_dt], y=fcast["fitted"],
+                mode="lines+markers", name="Forecast",
+                line=dict(color="#f59e0b", width=3, dash="dash"),
+                marker=dict(size=6),
+            ))
+
+            # Confidence band (forecast only)
+            fc_fig.add_trace(go.Scatter(
+                x=pd.concat([fcast[fc_dt], fcast[fc_dt][::-1]]),
+                y=pd.concat([fcast["upper"], fcast["lower"][::-1]]),
+                fill="toself",
+                fillcolor="rgba(245, 158, 11, 0.15)",
+                line=dict(color="rgba(0,0,0,0)"),
+                name="95% Confidence",
+                showlegend=True,
+            ))
+
+            fc_fig.update_layout(title=f"Forecast: {fc_val}")
+            st.plotly_chart(update_chart_design(fc_fig, height=450), use_container_width=True)
+
+            if r_sq < 0.3:
+                st.caption("Low R-squared — the trend line is a weak fit. Consider a different metric or more data.")
+            elif r_sq > 0.7:
+                st.caption("Strong fit. Forecast confidence is relatively high for near-term projections.")
+            else:
+                st.caption("Moderate fit. Forecast is directionally useful but treat exact values with caution.")
+    else:
+        st.info("Trend forecasting requires at least one datetime and one numeric column.")
 
 # ---------- EXPORT ----------
 with tab_export:
