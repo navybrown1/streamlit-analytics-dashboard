@@ -300,7 +300,7 @@ def get_gemini_key() -> str | None:
 def init_gemini(api_key: str):
     """Configure and return a Gemini generative model."""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-2.0-flash")
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
 def build_gemini_context(
