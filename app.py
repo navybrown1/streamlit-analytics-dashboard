@@ -11,414 +11,271 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+# =============================================================================
+# 1. CONFIGURATION & THEME
+# =============================================================================
 
 MAX_UPLOAD_MB = 200
 
-st.set_page_config(page_title="Business Analytics Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="Business Analytics Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# Modern, dynamic UI theme with animations
+# Clean, professional UI theme with CSS variables
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    
-    * {
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    :root {
+        --primary: #6366f1;
+        --primary-hover: #4f46e5;
+        --secondary: #8b5cf6;
+        --bg: #f8fafc;
+        --card-bg: #ffffff;
+        --text: #1e293b;
+        --text-secondary: #64748b;
+        --border: #e2e8f0;
+        --border-light: #f1f5f9;
+        --sidebar-bg: #0f172a;
+        --sidebar-text: #94a3b8;
+        --sidebar-heading: #f8fafc;
+        --success: #10b981;
+        --warning: #f59e0b;
+    }
+
+    html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text);
     }
-    
-    /* Animated gradient background */
-    .stApp {
-        background: linear-gradient(-45deg, #f0f4ff, #e6f3ff, #f0e6ff, #ffe6f0);
-        background-size: 400% 400%;
-        animation: gradientShift 15s ease infinite;
-    }
-    
-    @keyframes gradientShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    
-    /* Header styling */
-    header[data-testid="stHeader"] {
-        background: rgba(15, 23, 42, 0.95);
-        backdrop-filter: blur(12px);
-        border-bottom: 1px solid rgba(99, 102, 241, 0.2);
-    }
-    
-    /* Sidebar with glassmorphism */
+
+    .stApp { background-color: var(--bg); }
+
+    /* --- SIDEBAR --- */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%);
-        backdrop-filter: blur(20px);
-        border-right: 1px solid rgba(99, 102, 241, 0.2);
+        background-color: var(--sidebar-bg);
+        border-right: 1px solid #1e293b;
     }
-    
-    section[data-testid="stSidebar"] > div {
-        padding-top: 2rem;
-    }
-    
-    section[data-testid="stSidebar"] .stMarkdown, 
-    section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] .stCaption, 
+    section[data-testid="stSidebar"] .stMarkdown,
     section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span {
-        color: #e2e8f0 !important;
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] .stCaption {
+        color: var(--sidebar-text) !important;
     }
-    
-    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3 {
-        color: #f1f5f9 !important;
-        font-weight: 700 !important;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        color: var(--sidebar-heading) !important;
+        font-weight: 600;
+        letter-spacing: 0.3px;
     }
-    
-    /* Animated sidebar buttons */
+    section[data-testid="stSidebar"] .stSelectbox > div > div,
+    section[data-testid="stSidebar"] .stMultiSelect > div > div {
+        background-color: #1e293b;
+        color: white;
+        border: 1px solid #334155;
+    }
     section[data-testid="stSidebar"] .stButton > button {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        background: linear-gradient(90deg, var(--primary), var(--secondary));
         color: white;
         border: none;
-        border-radius: 12px;
+        border-radius: 8px;
         font-weight: 600;
-        padding: 12px 24px;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
-        position: relative;
-        overflow: hidden;
+        padding: 10px 20px;
+        box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.3);
+        transition: all 0.2s ease;
     }
-    
-    section[data-testid="stSidebar"] .stButton > button::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-        transition: left 0.5s;
-    }
-    
-    section[data-testid="stSidebar"] .stButton > button:hover::before {
-        left: 100%;
-    }
-    
     section[data-testid="stSidebar"] .stButton > button:hover {
-        background: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%);
-        transform: translateY(-2px) scale(1.02);
-        box-shadow: 0 8px 25px rgba(99, 102, 241, 0.5);
+        background: linear-gradient(90deg, var(--primary-hover), #7c3aed);
+        box-shadow: 0 6px 10px -1px rgba(99, 102, 241, 0.4);
     }
-    
-    /* Glassmorphic metric cards with animations */
-    div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(10px);
-        padding: 24px;
+
+    /* --- HEADER BANNER --- */
+    .dashboard-header {
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        padding: 2.5rem 2rem;
         border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.4);
         position: relative;
         overflow: hidden;
     }
-    
-    div[data-testid="stMetric"]::before {
-        content: '';
+    .dashboard-header::before {
+        content: "";
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);
-        transform: scaleX(0);
-        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: url('https://www.transparenttextures.com/patterns/cubes.png');
+        opacity: 0.08;
     }
-    
-    div[data-testid="stMetric"]:hover::before {
-        transform: scaleX(1);
+    .dashboard-header h1 {
+        color: white !important;
+        font-size: 2.4rem !important;
+        font-weight: 800 !important;
+        margin: 0 0 0.5rem 0 !important;
+        position: relative;
     }
-    
+    .dashboard-header p {
+        color: #e0e7ff !important;
+        font-size: 1.05rem;
+        max-width: 640px;
+        position: relative;
+    }
+
+    /* --- METRICS --- */
+    div[data-testid="stMetric"] {
+        background-color: var(--card-bg);
+        padding: 16px 20px;
+        border-radius: 12px;
+        border: 1px solid var(--border-light);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        transition: all 0.2s ease;
+    }
     div[data-testid="stMetric"]:hover {
-        transform: translateY(-8px) scale(1.02);
-        box-shadow: 0 16px 48px rgba(99, 102, 241, 0.2);
-        border-color: rgba(99, 102, 241, 0.4);
+        border-color: var(--primary);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12);
     }
-    
     div[data-testid="stMetric"] label {
-        color: #64748b !important;
+        color: var(--text-secondary) !important;
+        font-size: 0.8rem !important;
         font-weight: 600 !important;
-        font-size: 0.875rem !important;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: #1e293b !important;
-        font-weight: 800 !important;
-        font-size: 2rem !important;
-        background: linear-gradient(135deg, #6366f1, #8b5cf6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: var(--text) !important;
+        font-size: 1.75rem !important;
+        font-weight: 700 !important;
     }
-    
-    /* Modern tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: rgba(255, 255, 255, 0.5);
-        backdrop-filter: blur(10px);
-        padding: 8px;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.7);
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 12px;
-        padding: 12px 24px;
+
+    /* --- BUTTONS (main area) --- */
+    .stButton > button {
+        background: white;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 16px;
         font-weight: 600;
-        color: #64748b;
-        transition: all 0.3s ease;
-        border: none;
-        background: transparent;
+        transition: all 0.2s;
     }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
-        color: white !important;
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-        transform: scale(1.05);
+    .stButton > button:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+        background: #f5f3ff;
     }
-    
-    .stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
-        background: rgba(99, 102, 241, 0.1);
-        color: #6366f1;
-    }
-    
-    /* Animated download buttons */
+
+    /* --- DOWNLOAD BUTTONS --- */
     .stDownloadButton > button {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        background: linear-gradient(90deg, var(--success), #059669);
         color: white;
         border: none;
-        border-radius: 12px;
+        border-radius: 8px;
         font-weight: 600;
-        padding: 12px 28px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        padding: 10px 24px;
+        box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+        transition: all 0.2s;
     }
-    
     .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+        box-shadow: 0 6px 12px -1px rgba(16, 185, 129, 0.4);
     }
-    
-    /* Expanders with modern styling */
+
+    /* --- TABS --- */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: transparent;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--border);
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        border: none;
+        transition: all 0.2s;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: var(--primary);
+        background-color: #f5f3ff;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: white;
+        color: var(--primary) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    /* --- EXPANDERS --- */
     .streamlit-expanderHeader {
         font-weight: 600;
-        color: #1e293b;
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        padding: 12px 16px;
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        transition: all 0.3s ease;
-    }
-    
-    .streamlit-expanderHeader:hover {
-        background: rgba(99, 102, 241, 0.05);
-        border-color: rgba(99, 102, 241, 0.4);
-    }
-    
-    /* Dividers */
-    hr {
-        border: none;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
-        margin: 2rem 0;
-    }
-    
-    /* Hero title section */
-    .dashboard-title {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #312e81 100%);
-        padding: 48px 32px;
-        border-radius: 24px;
-        margin-bottom: 32px;
-        text-align: center;
-        position: relative;
-        overflow: hidden;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-    }
-    
-    .dashboard-title::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 70%);
-        animation: pulse 4s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-        0%, 100% { transform: scale(1); opacity: 0.5; }
-        50% { transform: scale(1.1); opacity: 0.8; }
-    }
-    
-    .dashboard-title h1 {
-        color: white !important;
-        font-size: 2.5rem !important;
-        margin: 0 !important;
-        letter-spacing: -0.02em;
-        font-weight: 800 !important;
-        position: relative;
-        z-index: 1;
-        text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
-    }
-    
-    .dashboard-title p {
-        color: #cbd5e1 !important;
-        margin: 16px 0 0 0 !important;
-        font-size: 1.1rem;
-        position: relative;
-        z-index: 1;
-        font-weight: 500;
-    }
-    
-    /* Info/warning/success boxes */
-    .stAlert {
-        border-radius: 12px;
-        border: none;
-        backdrop-filter: blur(10px);
-        animation: slideIn 0.4s ease;
-    }
-    
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateY(-10px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    /* Dataframes */
-    .stDataFrame {
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    }
-    
-    /* Input fields */
-    .stTextInput input, .stNumberInput input, .stSelectbox select {
-        border-radius: 10px;
-        border: 2px solid #e2e8f0;
-        transition: all 0.3s ease;
-    }
-    
-    .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox select:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-    }
-    
-    /* Sliders */
-    .stSlider {
-        padding: 8px 0;
-    }
-    
-    /* Checkbox and radio */
-    .stCheckbox, .stRadio {
-        transition: all 0.3s ease;
-    }
-    
-    /* File uploader */
-    section[data-testid="stFileUploadDropzone"] {
-        border-radius: 16px;
-        border: 2px dashed #cbd5e1;
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
-    }
-    
-    section[data-testid="stFileUploadDropzone"]:hover {
-        border-color: #6366f1;
-        background: rgba(99, 102, 241, 0.05);
-    }
-    
-    /* Loading animation */
-    .stSpinner > div {
-        border-color: #6366f1 transparent transparent transparent !important;
-    }
-    
-    /* Subheaders */
-    .stMarkdown h2, .stMarkdown h3 {
-        color: #1e293b;
-        font-weight: 700;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-        position: relative;
-        padding-left: 16px;
-    }
-    
-    .stMarkdown h2::before, .stMarkdown h3::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 4px;
-        height: 70%;
-        background: linear-gradient(180deg, #6366f1, #8b5cf6);
-        border-radius: 2px;
-    }
-    
-    /* Business context cards */
-    .business-card {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(10px);
-        padding: 24px;
-        border-radius: 16px;
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-        transition: all 0.3s ease;
-        height: 100%;
-    }
-    
-    .business-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
-    }
-    
-    /* Multiselect */
-    .stMultiSelect [data-baseweb="tag"] {
-        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: var(--text);
+        background-color: white;
         border-radius: 8px;
-        border: none;
     }
-    
-    /* Caption text */
-    .stCaption {
-        font-size: 0.875rem;
-        color: #64748b;
-        font-weight: 500;
-    }
-    
-    /* Code blocks */
-    .stCodeBlock {
+
+    /* --- CARDS --- */
+    .ui-card {
+        background: var(--card-bg);
+        padding: 1.5rem;
         border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--border);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        margin-bottom: 1rem;
+        transition: transform 0.2s, box-shadow 0.2s;
     }
+    .ui-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.06);
+    }
+
+    /* --- FILE UPLOADER --- */
+    section[data-testid="stFileUploadDropzone"] {
+        border-radius: 12px;
+        border: 2px dashed #cbd5e1;
+        background: white;
+        transition: all 0.2s;
+    }
+    section[data-testid="stFileUploadDropzone"]:hover {
+        border-color: var(--primary);
+        background: #f5f3ff;
+    }
+
+    /* --- DATAFRAMES --- */
+    .stDataFrame {
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    /* --- MISC --- */
+    .block-container { padding-top: 2rem; }
+    hr { border: none; height: 1px; background: var(--border); margin: 1.5rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# Hero section with animation
-st.markdown("""
-<div class="dashboard-title">
-    <h1>📊 Business Analytics Dashboard</h1>
-    <p>Upload a CSV to explore business context, data quality, filters, insights, and exports.</p>
-</div>
-""", unsafe_allow_html=True)
+
+# =============================================================================
+# 2. HELPER FUNCTIONS
+# =============================================================================
+
+def update_chart_design(fig, height=400):
+    """Apply consistent clean Plotly styling."""
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Inter, sans-serif", color="#1e293b"),
+        height=height,
+        margin=dict(l=20, r=20, t=40, b=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        title_font=dict(size=16, color="#0f172a", family="Inter, sans-serif"),
+        hoverlabel=dict(bgcolor="white", font_size=13, font_family="Inter, sans-serif"),
+    )
+    fig.update_xaxes(showgrid=False, linecolor="#cbd5e1")
+    fig.update_yaxes(showgrid=True, gridcolor="#f1f5f9", linecolor="#cbd5e1")
+    return fig
 
 
 def safe_widget_key(value: str) -> str:
@@ -453,7 +310,6 @@ def read_csv_bytes(file_bytes: bytes) -> tuple[pd.DataFrame, dict]:
                 return df, meta
             except Exception:
                 continue
-
     raise ValueError("Could not parse the CSV with supported encodings and delimiters.")
 
 
@@ -501,8 +357,7 @@ def column_types(df: pd.DataFrame) -> tuple[list[str], list[str], list[str], lis
     datetime_cols = df.select_dtypes(include=["datetime64[ns]", "datetimetz"]).columns.tolist()
     categorical_cols = df.select_dtypes(include=["object", "category", "bool", "string"]).columns.tolist()
     other_cols = [
-        col
-        for col in df.columns
+        col for col in df.columns
         if col not in set(numeric_cols + datetime_cols + categorical_cols)
     ]
     return numeric_cols, categorical_cols, datetime_cols, other_cols
@@ -526,17 +381,15 @@ def dataset_overview_table(df: pd.DataFrame) -> pd.DataFrame:
 
     rec = [recommendation(str(dtype[col]), float(missing_pct[col])) for col in df.columns]
 
-    overview = pd.DataFrame(
-        {
-            "column": df.columns,
-            "dtype": dtype.values,
-            "non_null": (df.shape[0] - missing).values,
-            "missing_count": missing.values,
-            "missing_pct": missing_pct.values,
-            "unique_values": unique_values.values,
-            "imputation_recommendation": rec,
-        }
-    )
+    overview = pd.DataFrame({
+        "column": df.columns,
+        "dtype": dtype.values,
+        "non_null": (df.shape[0] - missing).values,
+        "missing_count": missing.values,
+        "missing_pct": missing_pct.values,
+        "unique_values": unique_values.values,
+        "imputation_recommendation": rec,
+    })
     return overview.sort_values(["missing_pct", "unique_values"], ascending=[False, False])
 
 
@@ -544,15 +397,13 @@ def numeric_stats(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
     if not numeric_cols:
         return pd.DataFrame(columns=["column", "mean", "median", "std_dev", "min", "max"])
     data = df[numeric_cols]
-    stats = pd.DataFrame(
-        {
-            "mean": data.mean(numeric_only=True),
-            "median": data.median(numeric_only=True),
-            "std_dev": data.std(numeric_only=True),
-            "min": data.min(numeric_only=True),
-            "max": data.max(numeric_only=True),
-        }
-    )
+    stats = pd.DataFrame({
+        "mean": data.mean(numeric_only=True),
+        "median": data.median(numeric_only=True),
+        "std_dev": data.std(numeric_only=True),
+        "min": data.min(numeric_only=True),
+        "max": data.max(numeric_only=True),
+    })
     return stats.reset_index().rename(columns={"index": "column"})
 
 
@@ -610,7 +461,6 @@ def guess_export_date(text: str) -> str:
     iso_match = re.search(r"\d{4}-\d{2}-\d{2}", text)
     if iso_match:
         return iso_match.group(0)
-
     return datetime.now().date().isoformat()
 
 
@@ -629,27 +479,21 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
     kpis.append(("Total Trips", f"{len(df):,}", "Total records in current cleaned dataset"))
 
     if duration_col and pd.api.types.is_numeric_dtype(df[duration_col]):
-        kpis.append(
-            (
-                "Avg Trip Duration",
-                f"{df[duration_col].dropna().mean():.1f} min",
-                "Average trip time across filtered dataset",
-            )
-        )
+        kpis.append((
+            "Avg Trip Duration",
+            f"{df[duration_col].dropna().mean():.1f} min",
+            "Average trip time across filtered dataset",
+        ))
 
     if avg_energy_col and pd.api.types.is_numeric_dtype(df[avg_energy_col]):
-        kpis.append(
-            (
-                "Avg Trip Efficiency",
-                f"{df[avg_energy_col].dropna().mean():.1f} Wh/mi",
-                "Lower Wh/mi usually indicates better efficiency",
-            )
-        )
+        kpis.append((
+            "Avg Trip Efficiency",
+            f"{df[avg_energy_col].dropna().mean():.1f} Wh/mi",
+            "Lower Wh/mi usually indicates better efficiency",
+        ))
 
     if (
-        start_battery_col
-        and end_battery_col
-        and distance_col
+        start_battery_col and end_battery_col and distance_col
         and pd.api.types.is_numeric_dtype(df[start_battery_col])
         and pd.api.types.is_numeric_dtype(df[end_battery_col])
         and pd.api.types.is_numeric_dtype(df[distance_col])
@@ -659,13 +503,11 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
         if not subset.empty:
             rate = ((subset[start_battery_col] - subset[end_battery_col]) / subset[distance_col]) * 100
             if not rate.dropna().empty:
-                kpis.append(
-                    (
-                        "Battery Drop / 100 mi",
-                        f"{rate.dropna().mean():.2f}%",
-                        "Estimated battery percentage consumed per 100 miles",
-                    )
-                )
+                kpis.append((
+                    "Battery Drop / 100 mi",
+                    f"{rate.dropna().mean():.2f}%",
+                    "Estimated battery percentage consumed per 100 miles",
+                ))
 
     if start_col and end_col:
         route_series = (
@@ -676,13 +518,11 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
         if not route_series.empty:
             top_route = route_series.value_counts().head(1)
             if not top_route.empty:
-                kpis.append(
-                    (
-                        "Most Frequent Route",
-                        top_route.index[0][:24],
-                        f"{int(top_route.iloc[0]):,} trip(s) for top route",
-                    )
-                )
+                kpis.append((
+                    "Most Frequent Route",
+                    top_route.index[0][:24],
+                    f"{int(top_route.iloc[0]):,} trip(s) for top route",
+                ))
 
     return kpis[:5]
 
@@ -702,7 +542,6 @@ def apply_fill_missing(
             missing_count = int(out[col].isna().sum())
             if missing_count == 0:
                 continue
-
             if numeric_strategy == "Mean":
                 fill_value = out[col].mean()
             elif numeric_strategy == "Median":
@@ -712,7 +551,6 @@ def apply_fill_missing(
                 fill_value = modes.iloc[0] if not modes.empty else pd.NA
             else:
                 fill_value = pd.to_numeric(pd.Series([numeric_custom]), errors="coerce").iloc[0]
-
             if pd.isna(fill_value):
                 continue
             out[col] = out[col].fillna(fill_value)
@@ -724,13 +562,11 @@ def apply_fill_missing(
             missing_count = int(out[col].isna().sum())
             if missing_count == 0:
                 continue
-
             if categorical_strategy == "Mode":
                 modes = out[col].mode(dropna=True)
                 fill_value = modes.iloc[0] if not modes.empty else "Unknown"
             else:
                 fill_value = categorical_custom if categorical_custom.strip() else "Unknown"
-
             out[col] = out[col].fillna(fill_value)
             filled_cells += missing_count
 
@@ -745,23 +581,18 @@ def clean_text_columns(
 ) -> tuple[pd.DataFrame, int]:
     out = df.copy()
     changed_cells = 0
-
     for col in text_cols:
         if col not in out.columns:
             continue
-
         mask = out[col].notna()
         series = out.loc[mask, col].astype(str)
         before = series.copy()
-
         if trim_whitespace:
             series = series.str.strip()
         if remove_special_chars:
             series = series.str.replace(r"[^0-9a-zA-Z\s\-\.,:/()&]", "", regex=True)
-
         changed_cells += int((before != series).sum())
         out.loc[mask, col] = series
-
     return out, changed_cells
 
 
@@ -801,25 +632,19 @@ def comparison_metrics_table(
         filtered_series = df_filtered[col].dropna()
         if full_series.empty or filtered_series.empty:
             continue
-
         full_mean = float(full_series.mean())
         filtered_mean = float(filtered_series.mean())
         delta = filtered_mean - full_mean
         delta_pct = (delta / full_mean * 100) if full_mean != 0 else 0.0
-
-        rows.append(
-            {
-                "metric": col,
-                "full_mean": full_mean,
-                "filtered_mean": filtered_mean,
-                "delta": delta,
-                "delta_pct": delta_pct,
-            }
-        )
-
+        rows.append({
+            "metric": col,
+            "full_mean": full_mean,
+            "filtered_mean": filtered_mean,
+            "delta": delta,
+            "delta_pct": delta_pct,
+        })
     if not rows:
         return pd.DataFrame(columns=["metric", "full_mean", "filtered_mean", "delta", "delta_pct"])
-
     out = pd.DataFrame(rows)
     return out.sort_values("delta_pct", key=lambda s: s.abs(), ascending=False)
 
@@ -863,10 +688,10 @@ def apply_filters_sidebar(
     categorical_cols: list[str],
     datetime_cols: list[str],
 ) -> tuple[pd.DataFrame, list[str]]:
-    st.sidebar.header("🎯 Filters")
-    st.sidebar.caption("Choose columns to filter. Each filter narrows the current cleaned dataset.")
+    st.sidebar.markdown("## 🔍 Filters")
+    st.sidebar.caption("Refine your dataset. All visuals update automatically.")
 
-    if st.sidebar.button("🔄 Clear all filters", use_container_width=True):
+    if st.sidebar.button("Reset all filters", use_container_width=True):
         clear_filter_state()
         st.rerun()
 
@@ -883,9 +708,9 @@ def apply_filters_sidebar(
 
     for col in selected_cols:
         key_base = safe_widget_key(col)
+        st.sidebar.markdown(f"**{col}**")
 
         if col in categorical_cols:
-            st.sidebar.markdown(f"**{col}**")
             series = filtered[col].fillna("(Missing)").astype(str)
             unique_count = int(series.nunique(dropna=False))
             options = series.value_counts().head(75).index.tolist()
@@ -913,16 +738,13 @@ def apply_filters_sidebar(
                     filtered[col].fillna("").astype(str).str.contains(needle, case=False, na=False)
                 ]
                 summaries.append(f"{col} contains '{needle}'")
-
             st.sidebar.caption(f"Rows after {col}: {len(filtered):,}")
 
         elif col in numeric_cols:
-            st.sidebar.markdown(f"**{col}**")
             series = filtered[col].dropna()
             if series.empty:
                 st.sidebar.info(f"{col}: no numeric values available.")
                 continue
-
             min_val = float(series.min())
             max_val = float(series.max())
             if min_val == max_val:
@@ -950,16 +772,13 @@ def apply_filters_sidebar(
 
             if rng != default_range or not keep_missing:
                 summaries.append(f"{col}: {rng[0]:.3g} to {rng[1]:.3g}")
-
             st.sidebar.caption(f"Rows after {col}: {len(filtered):,}")
 
         elif col in datetime_cols:
-            st.sidebar.markdown(f"**{col}**")
             series = filtered[col].dropna()
             if series.empty:
                 st.sidebar.info(f"{col}: no datetime values available.")
                 continue
-
             min_dt = series.min()
             max_dt = series.max()
             if pd.isna(min_dt) or pd.isna(max_dt) or min_dt == max_dt:
@@ -984,15 +803,12 @@ def apply_filters_sidebar(
                 start_date, end_date = picked
                 start_ts = pd.to_datetime(start_date)
                 end_ts = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-
                 mask = (filtered[col] >= start_ts) & (filtered[col] <= end_ts)
                 if keep_missing:
                     mask = mask | filtered[col].isna()
                 filtered = filtered[mask]
-
                 day_count = (pd.Timestamp(end_date) - pd.Timestamp(start_date)).days + 1
                 summaries.append(f"{col}: {start_date} to {end_date} ({day_count} days)")
-
             st.sidebar.caption(f"Rows after {col}: {len(filtered):,}")
 
     return filtered, summaries
@@ -1049,10 +865,11 @@ def generate_findings(
             short_pct = float((durations < 10).mean() * 100)
             long_pct = float((durations > 30).mean() * 100)
             insights.append(
-                f"Trip duration: average **{avg_dur:.1f} min**, std dev **{std_dur:.1f}**, and 95% of trips are under **{p95_dur:.1f} min**."
+                f"Trip duration: average **{avg_dur:.1f} min**, std dev **{std_dur:.1f}**, "
+                f"95% of trips under **{p95_dur:.1f} min**."
             )
             insights.append(
-                f"Trip mix: **{short_pct:.1f}%** are short (<10 min) vs **{long_pct:.1f}%** long (>30 min)."
+                f"Trip mix: **{short_pct:.1f}%** short (<10 min) vs **{long_pct:.1f}%** long (>30 min)."
             )
 
     if energy_col and pd.api.types.is_numeric_dtype(df_filtered[energy_col]):
@@ -1075,7 +892,8 @@ def generate_findings(
                     if monthly.shape[0] >= 2:
                         trend = "improving" if monthly.iloc[-1] < monthly.iloc[0] else "declining"
                         insights.append(
-                            f"Energy efficiency trend appears **{trend}** from **{monthly.index[0].date()}** to **{monthly.index[-1].date()}**."
+                            f"Energy efficiency trend appears **{trend}** from "
+                            f"**{monthly.index[0].date()}** to **{monthly.index[-1].date()}**."
                         )
 
     if numeric_cols and not df_filtered.empty:
@@ -1132,14 +950,17 @@ def build_summary_payload(
             "Bar chart (categorical)",
             "Correlation heatmap",
             "Time series",
+            "Scatter explorer",
             "Missing data heatmap",
         ],
     }
 
 
 def build_html_report(summary: dict) -> str:
-    filters_html = "<li>No active filters</li>" if not summary["filters"] else "".join(
-        f"<li>{item}</li>" for item in summary["filters"]
+    filters_html = (
+        "<li>No active filters</li>"
+        if not summary["filters"]
+        else "".join(f"<li>{item}</li>" for item in summary["filters"])
     )
     insights_html = "".join(f"<li>{item}</li>" for item in summary["insights"])
     visuals_html = "".join(f"<li>{item}</li>" for item in summary["visualizations"])
@@ -1151,9 +972,11 @@ def build_html_report(summary: dict) -> str:
   <meta charset="utf-8" />
   <title>Analytics Summary Report</title>
   <style>
-    body {{ font-family: Arial, sans-serif; margin: 24px; line-height: 1.4; }}
-    h1, h2 {{ margin-bottom: 8px; }}
-    .meta {{ background: #f5f5f5; padding: 12px; border-radius: 8px; }}
+    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; margin: 40px; line-height: 1.6; color: #333; }}
+    h1 {{ color: #1e293b; border-bottom: 2px solid #6366f1; padding-bottom: 8px; }}
+    h2 {{ color: #334155; margin-top: 24px; }}
+    .meta {{ background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 24px; }}
+    li {{ margin-bottom: 4px; }}
   </style>
 </head>
 <body>
@@ -1182,81 +1005,69 @@ def build_html_report(summary: dict) -> str:
   <h2>Key Insights</h2>
   <ul>{insights_html}</ul>
 
-  <h2>Top Visuals</h2>
+  <h2>Visualizations Generated</h2>
   <ul>{visuals_html}</ul>
 </body>
 </html>
 """.strip()
 
 
-# Modern Plotly theme
-def apply_modern_chart_theme(fig):
-    """Apply consistent modern styling to Plotly charts"""
-    fig.update_layout(
-        plot_bgcolor='rgba(255, 255, 255, 0.9)',
-        paper_bgcolor='rgba(0, 0, 0, 0)',
-        font=dict(family="Inter, sans-serif", color="#1e293b"),
-        title_font=dict(size=18, color="#1e293b", family="Inter"),
-        hoverlabel=dict(
-            bgcolor="white",
-            font_size=13,
-            font_family="Inter"
-        ),
-        margin=dict(l=20, r=20, t=50, b=20)
-    )
-    fig.update_xaxes(
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(226, 232, 240, 0.5)',
-        showline=True,
-        linewidth=1,
-        linecolor='rgba(226, 232, 240, 0.8)'
-    )
-    fig.update_yaxes(
-        showgrid=True,
-        gridwidth=1,
-        gridcolor='rgba(226, 232, 240, 0.5)',
-        showline=True,
-        linewidth=1,
-        linecolor='rgba(226, 232, 240, 0.8)'
-    )
-    return fig
+# =============================================================================
+# 3. MAIN APPLICATION LAYOUT
+# =============================================================================
 
+# --- Hero Header ---
+st.markdown("""
+<div class="dashboard-header">
+    <h1>📊 Business Analytics Dashboard</h1>
+    <p>Interactive exploration, data quality diagnostics, and business insights from your CSV data.</p>
+</div>
+""", unsafe_allow_html=True)
 
-uploaded = st.file_uploader("📁 Upload a CSV file", type=["csv"])
+# --- File Upload ---
+col_upload_1, col_upload_2 = st.columns([1, 2])
+with col_upload_1:
+    st.markdown("### 📂 Data Import")
+    uploaded = st.file_uploader("Upload CSV file", type=["csv"], label_visibility="collapsed")
+
 if uploaded is None:
-    st.info("👆 Upload a CSV to begin your analytics journey")
+    with col_upload_2:
+        st.info(
+            "👋 **Welcome!** Upload a CSV file to begin. "
+            "The dashboard auto-detects schema, data types, and datetime columns."
+        )
     st.stop()
 
 if uploaded.size > MAX_UPLOAD_MB * 1024 * 1024:
-    st.error(f"❌ File exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
+    st.error(f"File exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
     st.stop()
 
 try:
-    with st.spinner("🔄 Reading your data..."):
+    with st.spinner("Reading your data..."):
         raw_bytes = uploaded.getvalue()
         data_raw, meta = read_csv_bytes(raw_bytes)
 except Exception as exc:
-    st.error("❌ Could not read this file as a CSV. Check delimiter, encoding, and file format.")
+    st.error("Could not read this file as a CSV. Check delimiter, encoding, and file format.")
     st.exception(exc)
     st.stop()
 
 if data_raw is None or data_raw.shape[1] == 0:
-    st.error("❌ This CSV has no columns. Upload a valid dataset.")
+    st.error("This CSV has no columns. Upload a valid dataset.")
     st.stop()
 
 if data_raw.empty:
-    st.error("❌ This CSV has no rows. Upload a non-empty dataset.")
+    st.error("This CSV has no rows. Upload a non-empty dataset.")
     st.stop()
 
 data_raw = data_raw.dropna(how="all").copy()
 if data_raw.empty:
-    st.error("❌ Your dataset has no usable rows after removing fully empty rows.")
+    st.error("No usable rows after removing fully empty rows.")
     st.stop()
 
 data_raw, renamed_columns = make_unique_columns(data_raw)
 data_raw = coerce_datetime_columns(data_raw)
 
+# --- Session State Init ---
 dataset_token = f"{uploaded.name}:{uploaded.size}"
 if st.session_state.get("dataset_token") != dataset_token:
     st.session_state["dataset_token"] = dataset_token
@@ -1271,32 +1082,33 @@ if st.session_state.get("dataset_token") != dataset_token:
     st.session_state["src_limitations"] = "Route names and tags may be user-entered and inconsistent."
 
 if renamed_columns:
-    st.warning(
-        "⚠️ Duplicate column names were detected and renamed with suffixes (example: __2, __3) to avoid ambiguity."
-    )
+    st.toast(f"Renamed {len(renamed_columns)} duplicate column(s) to avoid ambiguity", icon="⚠️")
 
-st.sidebar.header("🧹 Data Cleaning")
-st.sidebar.caption("Apply optional cleanup actions before filtering and visualization.")
+# =============================================================================
+# 4. SIDEBAR CLEANING TOOLS
+# =============================================================================
 
+st.sidebar.markdown("## 🧹 Data Cleaning")
+st.sidebar.caption("Apply optional cleanup before filtering and visualization.")
 working_data = st.session_state["working_data"]
 
-if st.sidebar.button("🗑️ Drop rows with missing values", use_container_width=True):
+if st.sidebar.button("Drop rows with missing values", use_container_width=True):
     before = len(working_data)
     working_data = working_data.dropna().copy()
     removed = before - len(working_data)
     st.session_state["cleaning_history"].append(
-        f"Dropped rows with missing values: {before:,} -> {len(working_data):,} (removed {removed:,})"
+        f"Dropped missing rows: {before:,} → {len(working_data):,} (removed {removed:,})"
     )
 
-if st.sidebar.button("🔄 Remove duplicate rows", use_container_width=True):
+if st.sidebar.button("Remove duplicate rows", use_container_width=True):
     before = len(working_data)
     working_data = working_data.drop_duplicates().copy()
     removed = before - len(working_data)
     st.session_state["cleaning_history"].append(
-        f"Removed duplicates: {before:,} -> {len(working_data):,} (removed {removed:,})"
+        f"Removed duplicates: {before:,} → {len(working_data):,} (removed {removed:,})"
     )
 
-with st.sidebar.expander("💉 Fill missing values", expanded=False):
+with st.sidebar.expander("Fill missing values", expanded=False):
     numeric_strategy = st.selectbox(
         "Numeric columns",
         options=["None", "Mean", "Median", "Mode", "Custom"],
@@ -1313,20 +1125,14 @@ with st.sidebar.expander("💉 Fill missing values", expanded=False):
         "Categorical custom value", value="Unknown", key="clean_categorical_custom"
     )
 
-    if st.button("Apply fill-missing", key="clean_apply_fill", use_container_width=True):
+    if st.button("Apply fill", key="clean_apply_fill", use_container_width=True):
         updated, filled_cells = apply_fill_missing(
-            working_data,
-            numeric_strategy,
-            categorical_strategy,
-            numeric_custom,
-            categorical_custom,
+            working_data, numeric_strategy, categorical_strategy, numeric_custom, categorical_custom,
         )
         working_data = updated
-        st.session_state["cleaning_history"].append(
-            f"Filled missing values: {filled_cells:,} cell(s) updated"
-        )
+        st.session_state["cleaning_history"].append(f"Filled missing values: {filled_cells:,} cell(s)")
 
-with st.sidebar.expander("🔄 Data type conversion", expanded=False):
+with st.sidebar.expander("Data type conversion", expanded=False):
     convert_col = st.selectbox(
         "Column to convert",
         options=working_data.columns.tolist(),
@@ -1346,51 +1152,43 @@ with st.sidebar.expander("🔄 Data type conversion", expanded=False):
             converted = pd.to_datetime(working_data[convert_col], errors="coerce")
         else:
             converted = working_data[convert_col].astype("string")
-
         after_non_null = int(converted.notna().sum())
         working_data[convert_col] = converted
         st.session_state["cleaning_history"].append(
-            f"Converted {convert_col} to {convert_target} ({after_non_null:,}/{before_non_null:,} non-null retained)"
+            f"Converted {convert_col} → {convert_target} ({after_non_null:,}/{before_non_null:,} non-null)"
         )
 
-with st.sidebar.expander("✨ Text cleaning", expanded=False):
+with st.sidebar.expander("Text cleaning", expanded=False):
     current_numeric, current_categorical, current_datetime, _ = column_types(working_data)
-    text_cols = st.multiselect(
-        "Columns",
-        options=current_categorical,
-        default=[],
-        key="clean_text_cols",
-    )
+    text_cols = st.multiselect("Columns", options=current_categorical, default=[], key="clean_text_cols")
     trim_whitespace = st.checkbox("Trim whitespace", value=True, key="clean_trim_whitespace")
     remove_special = st.checkbox("Remove special characters", value=False, key="clean_remove_special")
 
     if st.button("Apply text cleaning", key="clean_apply_text", use_container_width=True):
-        updated, changed = clean_text_columns(
-            working_data,
-            text_cols,
-            trim_whitespace,
-            remove_special,
-        )
+        updated, changed = clean_text_columns(working_data, text_cols, trim_whitespace, remove_special)
         working_data = updated
         st.session_state["cleaning_history"].append(
-            f"Text cleaning updated {changed:,} cell(s) across {len(text_cols)} column(s)"
+            f"Text cleaning: {changed:,} cell(s) across {len(text_cols)} column(s)"
         )
 
 working_data = coerce_datetime_columns(working_data)
 st.session_state["working_data"] = working_data
 
+# =============================================================================
+# 5. DATA PIPELINE
+# =============================================================================
+
 data = st.session_state["working_data"]
 if data.empty:
-    st.error("❌ No rows remain after cleaning actions. Re-upload file or adjust cleaning options.")
+    st.error("No rows remain after cleaning. Re-upload or adjust cleaning options.")
     st.stop()
 
 numeric_cols, categorical_cols, datetime_cols, other_cols = column_types(data)
 filtered_data, filter_summaries = apply_filters_sidebar(data, numeric_cols, categorical_cols, datetime_cols)
 
+# --- Business Context ---
 st.markdown("### 🎯 Business Question and Decision Context")
 
-# Business context cards with modern styling
-st.markdown('<div style="margin-bottom: 1.5rem;">', unsafe_allow_html=True)
 use_case_templates = {
     "Custom": {
         "question": "How can driving behavior and route choices improve Tesla efficiency, battery use, and trip planning?",
@@ -1438,49 +1236,45 @@ use_case_templates = {
         "recommended_filters": "Total Energy Used (kWh), Average Energy Used (Wh/mi), Distance (mi)",
     },
 }
-template_choice = st.selectbox(
-    "Business use-case template",
-    options=list(use_case_templates.keys()),
-    index=0,
-    key="biz_template_choice",
-)
-selected_template = use_case_templates[template_choice]
-st.markdown(f"**🎯 This dashboard answers:** {selected_template['question']}")
-st.caption(f"💡 Recommended filters: {selected_template['recommended_filters']}")
 
-st.markdown("**📋 Example questions answered**")
-for q in selected_template["questions_answered"]:
-    st.write(f"• {q}")
-
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown('<div class="business-card">', unsafe_allow_html=True)
-    st.markdown("**💡 Why this matters**")
-    st.markdown(
-        "• Identify high-energy trips and routes\n"
-        "• Improve charging and route planning decisions\n"
-        "• Track consistency of driving efficiency over time"
+col_ctx1, col_ctx2 = st.columns([1, 2])
+with col_ctx1:
+    template_choice = st.selectbox(
+        "Analysis goal",
+        options=list(use_case_templates.keys()),
+        index=0,
+        key="biz_template_choice",
     )
-    st.markdown('</div>', unsafe_allow_html=True)
-with c2:
-    st.markdown('<div class="business-card">', unsafe_allow_html=True)
-    st.markdown("**🎯 Business objectives**")
-    st.markdown(
-        "• Reduce average energy use (Wh/mi)\n"
-        "• Monitor battery drop per distance\n"
-        "• Identify frequent start/end route clusters"
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    selected_template = use_case_templates[template_choice]
 
-st.markdown('</div>', unsafe_allow_html=True)
+with col_ctx2:
+    st.info(f"**Question:** {selected_template['question']}\n\n**Focus:** {selected_template['recommended_filters']}")
 
+with st.expander("Example questions answered & objectives", expanded=False):
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**📋 Questions answered**")
+        for q in selected_template["questions_answered"]:
+            st.write(f"• {q}")
+    with c2:
+        st.markdown("**🎯 Business objectives**")
+        st.markdown(
+            "• Reduce average energy use (Wh/mi)\n"
+            "• Monitor battery drop per distance\n"
+            "• Identify frequent start/end route clusters"
+        )
+
+# --- KPIs ---
+st.markdown("### 📈 Key Performance Indicators")
 kpis = calculate_business_kpis(filtered_data)
 if kpis:
-    st.markdown("### 📊 Key Performance Indicators")
     kpi_cols = st.columns(len(kpis))
     for idx, (label, value, help_text) in enumerate(kpis):
         kpi_cols[idx].metric(label, value, help=help_text)
+else:
+    st.info("Insufficient data to generate KPIs.")
 
+# --- Filter status ---
 full_rows = len(data)
 filtered_rows = len(filtered_data)
 removed_rows = full_rows - filtered_rows
@@ -1488,53 +1282,51 @@ removed_pct = (removed_rows / full_rows * 100) if full_rows else 0
 
 if filter_summaries:
     st.warning(
-        f"🔍 Viewing: {filtered_rows:,} of {full_rows:,} rows ({(filtered_rows / full_rows * 100):.1f}%). "
+        f"🔍 Viewing {filtered_rows:,} of {full_rows:,} rows ({(filtered_rows / full_rows * 100):.1f}%). "
         f"Active filters: {', '.join(filter_summaries)}"
     )
-    st.caption(f"Filtering removed {removed_rows:,} rows ({removed_pct:.1f}%).")
 else:
-    st.info(f"✅ Viewing full cleaned dataset: {full_rows:,} rows. No active filters.")
+    st.info(f"Viewing full cleaned dataset: {full_rows:,} rows. No active filters.")
 
 if filtered_rows == 0:
-    st.error("❌ No data matches current filters. Use 'Clear all filters' or loosen filter values.")
+    st.error("No data matches current filters. Use 'Reset all filters' or loosen criteria.")
 elif filtered_rows < max(10, int(0.05 * full_rows)):
-    st.warning("⚠️ Current filters keep less than 5% of rows. Insights may be unstable due to low sample size.")
+    st.warning("Current filters keep less than 5% of rows. Insights may be unstable.")
 
-if st.button("🔄 Clear all filters (global)", use_container_width=False):
-    clear_filter_state()
-    st.rerun()
+# --- Data stats (collapsed) ---
+with st.expander("📊 Data Stats & Cleaning History", expanded=False):
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Rows (cleaned)", f"{len(data):,}")
+    s2.metric("Rows (filtered)", f"{len(filtered_data):,}")
+    s3.metric("Columns", f"{data.shape[1]}")
+    s4.metric("Duplicates", f"{int(data.duplicated().sum()):,}")
 
-dup_count = int(data.duplicated().sum())
-mem_mb = float(data.memory_usage(deep=True).sum() / (1024 * 1024))
-
-st.markdown("### 📈 Dataset Overview")
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Rows (cleaned)", f"{len(data):,}")
-m2.metric("Rows (filtered)", f"{len(filtered_data):,}")
-m3.metric("Columns", f"{data.shape[1]}")
-m4.metric("Duplicate rows", f"{dup_count:,}")
-
-st.caption(
-    "💾 Loaded using encoding: {enc} (delimiter: {delim}). Memory: {mem:.2f} MB.".format(
-        enc=meta.get("encoding", "unknown"),
-        delim=meta.get("delimiter", "unknown"),
-        mem=mem_mb,
+    mem_mb = float(data.memory_usage(deep=True).sum() / (1024 * 1024))
+    st.caption(
+        f"Encoding: {meta.get('encoding', 'unknown')} | "
+        f"Delimiter: {meta.get('delimiter', 'unknown')} | "
+        f"Memory: {mem_mb:.2f} MB"
     )
-)
 
-if st.session_state["cleaning_history"]:
-    with st.expander("📝 Cleaning history", expanded=False):
+    if st.session_state["cleaning_history"]:
+        st.markdown("---")
+        st.markdown("**Cleaning history:**")
         for idx, item in enumerate(st.session_state["cleaning_history"], start=1):
-            st.write(f"{idx}. {item}")
+            st.caption(f"{idx}. {item}")
 
-st.divider()
+st.markdown("<br>", unsafe_allow_html=True)
+
+# =============================================================================
+# 6. TABS
+# =============================================================================
 
 tab_overview, tab_explore, tab_viz, tab_compare, tab_findings, tab_export, tab_help = st.tabs(
-    ["📊 Overview", "🔍 Explore", "📈 Visualize", "⚖️ Compare", "💡 Findings", "📥 Export", "❓ Help"]
+    ["📋 Overview", "🔎 Explore", "📊 Visualize", "⚖️ Compare", "💡 Findings", "📥 Export", "❓ Help"]
 )
 
+# ---------- OVERVIEW ----------
 with tab_overview:
-    st.subheader("📋 Data Source and Provenance")
+    st.subheader("Data Source and Provenance")
     p1, p2 = st.columns(2)
     with p1:
         st.text_input("Source system", key="src_system")
@@ -1542,35 +1334,30 @@ with tab_overview:
     with p2:
         st.text_input("Data owner", key="src_owner")
         st.text_input("Source URL/reference", key="src_url")
-
     st.text_area("Known data quality issues or limitations", key="src_limitations", height=80)
 
-    st.subheader("📑 Column Schema")
-    schema_df = pd.DataFrame(
-        {
-            "column": data.columns,
-            "dtype": data.dtypes.astype(str).values,
-            "description": [infer_schema_description(c) for c in data.columns],
-        }
-    )
-    st.dataframe(schema_df, use_container_width=True, height=220)
-
-    st.subheader("🔍 Data Quality Summary")
-    left, right = st.columns([1.1, 0.9])
-
-    with left:
+    col_ov1, col_ov2 = st.columns([3, 2])
+    with col_ov1:
+        st.subheader("Data Quality Summary")
         overview = dataset_overview_table(data)
-        st.dataframe(overview, use_container_width=True, height=360)
-
-    with right:
-        st.subheader("📊 Numeric Descriptive Stats")
+        st.dataframe(overview, use_container_width=True, height=400)
+    with col_ov2:
+        st.subheader("Numeric Descriptive Stats")
         if numeric_cols:
             stats = numeric_stats(data, numeric_cols)
-            st.dataframe(stats, use_container_width=True, height=360)
+            st.dataframe(stats, use_container_width=True, height=400)
         else:
             st.info("No numeric columns detected.")
 
-    st.subheader("🗺️ Missing Data Heatmap")
+    st.subheader("Column Schema")
+    schema_df = pd.DataFrame({
+        "column": data.columns,
+        "dtype": data.dtypes.astype(str).values,
+        "description": [infer_schema_description(c) for c in data.columns],
+    })
+    st.dataframe(schema_df, use_container_width=True, height=220)
+
+    st.subheader("Missing Data Heatmap")
     miss_matrix = data.head(500).isna().astype(int).T
     if miss_matrix.empty:
         st.info("No rows available for missing-data heatmap.")
@@ -1582,96 +1369,71 @@ with tab_overview:
             labels={"x": "Row index", "y": "Column", "color": "Missing"},
             title="Missing data pattern (first 500 rows)",
         )
-        miss_fig = apply_modern_chart_theme(miss_fig)
-        st.plotly_chart(miss_fig, use_container_width=True)
+        st.plotly_chart(update_chart_design(miss_fig, height=350), use_container_width=True)
 
+# ---------- EXPLORE ----------
 with tab_explore:
-    st.subheader("🔍 Filtered Data Preview")
+    st.subheader("Filtered Data Preview")
     if filtered_data.empty:
-        st.warning("⚠️ No data matches your filters. Try adjusting filter criteria.")
+        st.warning("Filters too strict — no data to show.")
     else:
         default_cols = filtered_data.columns.tolist()[: min(10, filtered_data.shape[1])]
-        show_cols = st.multiselect(
-            "Columns to display",
-            options=filtered_data.columns.tolist(),
-            default=default_cols,
-        )
-        st.dataframe(filtered_data[show_cols].head(500), use_container_width=True, height=520)
+        show_cols = st.multiselect("Columns to display", options=filtered_data.columns.tolist(), default=default_cols)
+        st.caption(f"Showing top 500 of {len(filtered_data):,} rows")
+        st.dataframe(filtered_data[show_cols].head(500), use_container_width=True, height=560)
 
+# ---------- VISUALIZE ----------
 with tab_viz:
     if filtered_data.empty:
-        st.warning("⚠️ No charts available because the filtered dataset is empty.")
+        st.warning("No charts available — filtered dataset is empty.")
     else:
-        palette_choice = st.selectbox(
-            "🎨 Color palette",
-            options=["Plotly", "Safe", "Bold", "Dark24", "Set2"],
-            index=0,
-            key="viz_palette",
-        )
+        # Controls row
+        vc1, vc2, vc3 = st.columns(3)
+        with vc1:
+            palette_choice = st.selectbox("Color palette", ["Plotly", "Safe", "Bold", "Dark24", "Set2"], key="viz_palette")
+        with vc2:
+            log_histogram = st.toggle("Log-scale histogram", value=False, key="viz_hist_log")
+        with vc3:
+            bar_mode = st.selectbox("Bar layout", ["group", "stack"], key="viz_bar_mode")
+
         palette_sequence = get_palette_sequence(palette_choice)
-        log_histogram = st.toggle("📊 Log scale histogram y-axis", value=False, key="viz_hist_log")
-        bar_mode = st.selectbox(
-            "📊 Bar layout mode",
-            options=["group", "stack"],
-            index=0,
-            key="viz_bar_mode",
-        )
         st.caption(sample_size_label(data, filtered_data, datetime_cols))
 
+        # --- Histogram + Bar side by side ---
         v1, v2 = st.columns(2)
 
         with v1:
-            st.subheader("📊 Histogram (numeric)")
+            st.subheader("Histogram (numeric)")
             if numeric_cols:
                 hist_col = st.selectbox("Numeric column", options=numeric_cols, index=0, key="viz_hist_col")
-                bins = st.slider("Bins", min_value=5, max_value=80, value=30, key="viz_hist_bins")
+                bins = st.slider("Bins", 5, 80, 30, key="viz_hist_bins")
 
                 color_by = None
                 if categorical_cols:
                     color_choices = ["(None)"] + categorical_cols
-                    pick = st.selectbox("Color by (optional)", options=color_choices, index=0, key="viz_hist_color")
+                    pick = st.selectbox("Color by", options=color_choices, index=0, key="viz_hist_color")
                     if pick != "(None)":
                         color_by = pick
-                hist_title = st.text_input(
-                    "Histogram title",
-                    value=f"Distribution of {hist_col}",
-                    key="viz_hist_title",
-                )
 
                 hist_fig = px.histogram(
-                    filtered_data,
-                    x=hist_col,
-                    nbins=bins,
-                    color=color_by,
-                    title=hist_title,
+                    filtered_data, x=hist_col, nbins=bins, color=color_by,
+                    title=f"Distribution of {hist_col}",
                     color_discrete_sequence=palette_sequence,
                 )
                 if log_histogram:
                     hist_fig.update_yaxes(type="log")
-                hist_fig = apply_modern_chart_theme(hist_fig)
-                st.plotly_chart(hist_fig, use_container_width=True)
-                st.caption(sample_size_label(data, filtered_data, datetime_cols))
+                st.plotly_chart(update_chart_design(hist_fig), use_container_width=True)
             else:
-                st.info("No numeric columns available for a histogram.")
+                st.info("No numeric columns available.")
 
         with v2:
-            st.subheader("📊 Bar Chart (categorical)")
+            st.subheader("Bar Chart (categorical)")
             if categorical_cols:
                 cat_col = st.selectbox("Categorical column", options=categorical_cols, index=0, key="viz_bar_cat")
                 split_options = ["(None)"] + [c for c in categorical_cols if c != cat_col]
-                split_by = st.selectbox(
-                    "Split by (optional)",
-                    options=split_options,
-                    index=0,
-                    key="viz_bar_split",
-                )
-                top_n = st.slider("Top categories to show", min_value=5, max_value=30, value=10, key="viz_bar_topn")
+                split_by = st.selectbox("Split by", options=split_options, index=0, key="viz_bar_split")
+                top_n = st.slider("Top categories", 5, 30, 10, key="viz_bar_topn")
                 as_percent = st.toggle("Show as percent", value=False, key="viz_bar_pct")
-                bar_title = st.text_input(
-                    "Bar chart title",
-                    value=f"Top {top_n} categories for {cat_col}",
-                    key="viz_bar_title",
-                )
 
                 if split_by == "(None)":
                     series = filtered_data[cat_col].fillna("(Missing)").astype(str)
@@ -1679,19 +1441,16 @@ with tab_viz:
                     bar_df = vc.reset_index()
                     bar_df.columns = [cat_col, "count"]
                     y_field = "count"
-                    title = bar_title
+                    title = f"Top {top_n}: {cat_col}"
 
                     if as_percent:
                         bar_df["percent"] = bar_df["count"] / bar_df["count"].sum() * 100
                         y_field = "percent"
-                        title = f"{bar_title} (%)"
+                        title += " (%)"
 
                     bar_fig = px.bar(
-                        bar_df,
-                        x=cat_col,
-                        y=y_field,
-                        title=title,
-                        color_discrete_sequence=palette_sequence,
+                        bar_df, x=cat_col, y=y_field, title=title,
+                        color=y_field, color_continuous_scale="Bluyl",
                     )
                 else:
                     split_df = filtered_data[[cat_col, split_by]].copy()
@@ -1702,57 +1461,55 @@ with tab_viz:
                     split_df = split_df[split_df[cat_col].isin(top_categories)]
                     bar_df = split_df.groupby([cat_col, split_by]).size().reset_index(name="count")
                     y_field = "count"
-                    title = bar_title
+                    title = f"Top {top_n}: {cat_col}"
 
                     if as_percent:
                         bar_df["percent"] = (
                             bar_df["count"] / bar_df.groupby(cat_col)["count"].transform("sum") * 100
                         )
                         y_field = "percent"
-                        title = f"{bar_title} (%)"
+                        title += " (%)"
 
                     bar_fig = px.bar(
-                        bar_df,
-                        x=cat_col,
-                        y=y_field,
-                        color=split_by,
-                        barmode=bar_mode,
-                        title=title,
+                        bar_df, x=cat_col, y=y_field, color=split_by,
+                        barmode=bar_mode, title=title,
                         color_discrete_sequence=palette_sequence,
                     )
-
                 if as_percent:
                     bar_fig.update_yaxes(ticksuffix="%")
-                bar_fig = apply_modern_chart_theme(bar_fig)
-                st.plotly_chart(bar_fig, use_container_width=True)
-                st.caption(sample_size_label(data, filtered_data, datetime_cols))
+                st.plotly_chart(update_chart_design(bar_fig), use_container_width=True)
             else:
-                st.info("No categorical columns available for a bar chart.")
+                st.info("No categorical columns available.")
 
         st.divider()
-        st.subheader("🔗 Correlation (numeric)")
+
+        # --- Correlation ---
+        st.subheader("Correlation (numeric)")
         if len(numeric_cols) >= 2:
             corr = filtered_data[numeric_cols].corr(numeric_only=True)
-            corr_fig = px.imshow(corr, text_auto=".2f", title="Correlation heatmap (filtered view)",
-                               color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
-            corr_fig = apply_modern_chart_theme(corr_fig)
-            st.plotly_chart(corr_fig, use_container_width=True)
+            corr_fig = px.imshow(
+                corr, text_auto=".2f", title="Correlation Matrix",
+                color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
+            )
+            st.plotly_chart(update_chart_design(corr_fig, height=500), use_container_width=True)
             st.caption(sample_size_label(data, filtered_data, datetime_cols))
         else:
-            st.info("Need at least 2 numeric columns for a correlation heatmap.")
+            st.info("Need at least 2 numeric columns for correlation.")
 
         st.divider()
-        st.subheader("📈 Time Series (if dates are available)")
+
+        # --- Time Series ---
+        st.subheader("Time Series")
         if datetime_cols and numeric_cols:
-            t1, t2, t3 = st.columns([0.38, 0.38, 0.24])
+            t1, t2, t3, t4 = st.columns([0.3, 0.3, 0.2, 0.2])
             with t1:
                 dt_col = st.selectbox("Date column", options=datetime_cols, index=0)
             with t2:
                 val_col = st.selectbox("Value column", options=numeric_cols, index=0)
             with t3:
                 freq = st.selectbox("Bucket", options=["D", "W", "M"], index=1)
-
-            agg = st.selectbox("Aggregation", options=["sum", "mean", "median", "count"], index=0)
+            with t4:
+                agg = st.selectbox("Aggregation", options=["sum", "mean", "median", "count"], index=0)
 
             ts = filtered_data[[dt_col, val_col]].dropna(subset=[dt_col]).copy()
             if ts.empty:
@@ -1769,21 +1526,21 @@ with tab_viz:
                     ts_out = ts[val_col].resample(freq).sum().rename("value").reset_index()
 
                 ts_fig = px.line(
-                    ts_out,
-                    x=dt_col,
-                    y="value",
+                    ts_out, x=dt_col, y="value",
                     title=f"{agg.title()} of {val_col} over time ({freq})",
-                    color_discrete_sequence=palette_sequence,
+                    markers=True, line_shape="spline",
+                    color_discrete_sequence=[palette_sequence[0]],
                 )
                 ts_fig.update_traces(line=dict(width=3))
-                ts_fig = apply_modern_chart_theme(ts_fig)
-                st.plotly_chart(ts_fig, use_container_width=True)
+                st.plotly_chart(update_chart_design(ts_fig), use_container_width=True)
                 st.caption(sample_size_label(data, filtered_data, datetime_cols))
         else:
             st.info("Time series requires at least one datetime and one numeric column.")
 
         st.divider()
-        st.subheader("🔬 Scatter Explorer")
+
+        # --- Scatter Explorer ---
+        st.subheader("Scatter Explorer")
         if len(numeric_cols) >= 2:
             sc1, sc2, sc3 = st.columns([0.4, 0.4, 0.2])
             with sc1:
@@ -1792,44 +1549,37 @@ with tab_viz:
                 y_candidates = [c for c in numeric_cols if c != x_col] or numeric_cols
                 y_col = st.selectbox("Y-axis", options=y_candidates, index=0, key="viz_scatter_y")
             with sc3:
-                max_points = st.slider("Max points", min_value=200, max_value=3000, value=1500, step=100, key="viz_scatter_n")
+                max_points = st.slider("Max points", 200, 3000, 1500, 100, key="viz_scatter_n")
 
             scatter_df = filtered_data[[x_col, y_col]].dropna().head(max_points)
             if scatter_df.empty:
                 st.info("Not enough non-null values for scatter plot.")
             else:
                 scatter_fig = px.scatter(
-                    scatter_df,
-                    x=x_col,
-                    y=y_col,
+                    scatter_df, x=x_col, y=y_col,
                     title=f"{y_col} vs {x_col}",
                     color_discrete_sequence=palette_sequence,
                 )
                 scatter_fig.update_traces(marker=dict(size=8, opacity=0.6))
-                scatter_fig = apply_modern_chart_theme(scatter_fig)
-                st.plotly_chart(scatter_fig, use_container_width=True)
-                st.caption(f"Scatter sample size: n = {len(scatter_df):,}")
+                st.plotly_chart(update_chart_design(scatter_fig), use_container_width=True)
+                st.caption(f"Scatter sample: n = {len(scatter_df):,}")
         else:
             st.info("Need at least two numeric columns for scatter exploration.")
 
+# ---------- COMPARE ----------
 with tab_compare:
-    st.subheader("⚖️ Comparison and Benchmarking")
+    st.subheader("Filtered vs Full Dataset")
     if filtered_data.empty:
-        st.warning("⚠️ No comparison available because filtered data is empty.")
+        st.warning("No comparison available — filtered data is empty.")
     else:
         st.caption(sample_size_label(data, filtered_data, datetime_cols))
 
         compare_df = comparison_metrics_table(data, filtered_data, numeric_cols)
         if compare_df.empty:
-            st.info("No numeric metrics available for filtered vs full comparison.")
+            st.info("No numeric metrics available for comparison.")
         else:
             metric_options = compare_df["metric"].tolist()
-            metric_choice = st.selectbox(
-                "Metric to compare",
-                options=metric_options,
-                index=0,
-                key="cmp_metric_choice",
-            )
+            metric_choice = st.selectbox("Metric to compare", options=metric_options, index=0, key="cmp_metric_choice")
             chosen_row = compare_df[compare_df["metric"] == metric_choice].iloc[0]
 
             cm1, cm2, cm3 = st.columns(3)
@@ -1841,17 +1591,17 @@ with tab_compare:
 
             comp_fig = px.bar(
                 compare_df.head(10),
-                x="metric",
-                y=["full_mean", "filtered_mean"],
+                x="metric", y=["full_mean", "filtered_mean"],
                 barmode="group",
                 title="Filtered vs full means (top 10 metrics)",
                 color_discrete_sequence=get_palette_sequence("Safe"),
             )
-            comp_fig = apply_modern_chart_theme(comp_fig)
-            st.plotly_chart(comp_fig, use_container_width=True)
+            st.plotly_chart(update_chart_design(comp_fig), use_container_width=True)
 
         st.divider()
-        st.subheader("📅 Time Period Comparison")
+
+        # --- Time Period Comparison ---
+        st.subheader("Time Period Comparison")
         if datetime_cols and numeric_cols:
             pc1, pc2, pc3 = st.columns([0.4, 0.4, 0.2])
             with pc1:
@@ -1868,50 +1618,43 @@ with tab_compare:
             else:
                 full_agg = (
                     full_ts.set_index(period_dt_col)[period_metric_col]
-                    .resample(period_freq)
-                    .mean()
-                    .rename("value")
-                    .reset_index()
+                    .resample(period_freq).mean().rename("value").reset_index()
                 )
                 full_agg["dataset"] = "Full"
 
                 filt_agg = (
                     filt_ts.set_index(period_dt_col)[period_metric_col]
-                    .resample(period_freq)
-                    .mean()
-                    .rename("value")
-                    .reset_index()
+                    .resample(period_freq).mean().rename("value").reset_index()
                 )
                 filt_agg["dataset"] = "Filtered"
 
                 comp_time = pd.concat([full_agg, filt_agg], ignore_index=True)
                 time_fig = px.line(
-                    comp_time,
-                    x=period_dt_col,
-                    y="value",
-                    color="dataset",
+                    comp_time, x=period_dt_col, y="value", color="dataset",
                     title=f"Mean {period_metric_col} over time: filtered vs full",
                     color_discrete_sequence=get_palette_sequence("Bold"),
+                    markers=True, line_shape="spline",
                 )
                 time_fig.update_traces(line=dict(width=3))
-                time_fig = apply_modern_chart_theme(time_fig)
-                st.plotly_chart(time_fig, use_container_width=True)
+                st.plotly_chart(update_chart_design(time_fig), use_container_width=True)
         else:
             st.info("Need one datetime and one numeric column for time period comparison.")
 
         st.divider()
-        st.subheader("🎯 Benchmark Target Tracking")
+
+        # --- Benchmark ---
+        st.subheader("Benchmark Target Tracking")
         if numeric_cols:
             b1, b2, b3 = st.columns([0.35, 0.35, 0.3])
             with b1:
                 benchmark_col = st.selectbox("Benchmark metric", options=numeric_cols, key="cmp_bench_col")
-            current_metric = float(filtered_data[benchmark_col].dropna().mean()) if filtered_data[benchmark_col].dropna().shape[0] else 0.0
+            current_metric = (
+                float(filtered_data[benchmark_col].dropna().mean())
+                if filtered_data[benchmark_col].dropna().shape[0]
+                else 0.0
+            )
             with b2:
-                benchmark_target = st.number_input(
-                    "Target value",
-                    value=current_metric,
-                    key="cmp_bench_target",
-                )
+                benchmark_target = st.number_input("Target value", value=current_metric, key="cmp_bench_target")
             with b3:
                 goal_direction = st.selectbox(
                     "Goal direction",
@@ -1922,107 +1665,100 @@ with tab_compare:
             if goal_direction == "Lower is better":
                 met_target = current_metric <= benchmark_target
                 gap = current_metric - benchmark_target
-                status_line = f"Current mean {benchmark_col}: {current_metric:.3g}. Gap to target: {gap:.3g}."
             else:
                 met_target = current_metric >= benchmark_target
                 gap = benchmark_target - current_metric
-                status_line = f"Current mean {benchmark_col}: {current_metric:.3g}. Gap to target: {gap:.3g}."
 
+            status_line = f"Current mean {benchmark_col}: {current_metric:.3g}. Gap to target: {gap:.3g}."
             if met_target:
-                st.success(f"✅ Target met. {status_line}")
+                st.success(f"Target met. {status_line}")
             else:
-                st.warning(f"⚠️ Target not yet met. {status_line}")
+                st.warning(f"Target not yet met. {status_line}")
         else:
             st.info("No numeric columns available for benchmark tracking.")
 
+# ---------- FINDINGS ----------
 with tab_findings:
-    st.subheader("💡 Top Insights")
+    st.subheader("Automated Insights")
     insights = generate_findings(data, filtered_data, numeric_cols, categorical_cols, datetime_cols)
     for idx, insight in enumerate(insights, start=1):
         st.write(f"**{idx}.** {insight}")
-    st.caption("💡 Insights are heuristic and intended to accelerate exploratory analysis.")
+    st.caption("Insights are heuristic and intended to accelerate exploratory analysis.")
 
+# ---------- EXPORT ----------
 with tab_export:
-    st.subheader("📥 Export")
+    st.subheader("Export Results")
     if filtered_data.empty:
-        st.warning("⚠️ Filtered dataset is empty, so there is nothing to export.")
+        st.warning("Filtered dataset is empty — nothing to export.")
     else:
-        csv_bytes = filtered_data.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download filtered CSV",
-            data=csv_bytes,
-            file_name="filtered_data.csv",
-            mime="text/csv",
-        )
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            csv_bytes = filtered_data.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download filtered CSV", csv_bytes,
+                "filtered_data.csv", "text/csv", use_container_width=True,
+            )
+        with col_ex2:
+            source_info = {
+                "source_system": st.session_state.get("src_system", ""),
+                "export_date": st.session_state.get("src_export_date", ""),
+                "owner": st.session_state.get("src_owner", ""),
+                "source_url": st.session_state.get("src_url", ""),
+                "limitations": st.session_state.get("src_limitations", ""),
+            }
+            insights = generate_findings(data, filtered_data, numeric_cols, categorical_cols, datetime_cols)
+            summary = build_summary_payload(
+                data, filtered_data, filter_summaries, insights, meta, source_info, datetime_cols,
+            )
+            summary_json = json.dumps(summary, indent=2)
+            st.download_button(
+                "Download summary (JSON)", summary_json,
+                "analysis_summary.json", "application/json", use_container_width=True,
+            )
 
-        source_info = {
-            "source_system": st.session_state.get("src_system", ""),
-            "export_date": st.session_state.get("src_export_date", ""),
-            "owner": st.session_state.get("src_owner", ""),
-            "source_url": st.session_state.get("src_url", ""),
-            "limitations": st.session_state.get("src_limitations", ""),
-        }
-
-        insights = generate_findings(data, filtered_data, numeric_cols, categorical_cols, datetime_cols)
-        summary = build_summary_payload(
-            data,
-            filtered_data,
-            filter_summaries,
-            insights,
-            meta,
-            source_info,
-            datetime_cols,
-        )
-
-        summary_json = json.dumps(summary, indent=2)
-        summary_html = build_html_report(summary)
-
-        st.download_button(
-            label="📥 Download analysis summary (JSON)",
-            data=summary_json,
-            file_name="analysis_summary.json",
-            mime="application/json",
-        )
-        st.download_button(
-            label="📥 Download analysis summary (HTML)",
-            data=summary_html,
-            file_name="analysis_summary.html",
-            mime="text/html",
-        )
-        st.download_button(
-            label="📥 Download README template",
-            data=build_readme_text(),
-            file_name="README.md",
-            mime="text/markdown",
-        )
+        col_ex3, col_ex4 = st.columns(2)
+        with col_ex3:
+            summary_html = build_html_report(summary)
+            st.download_button(
+                "Download report (HTML)", summary_html,
+                "analysis_summary.html", "text/html", use_container_width=True,
+            )
+        with col_ex4:
+            st.download_button(
+                "Download README", build_readme_text(),
+                "README.md", "text/markdown", use_container_width=True,
+            )
 
         st.caption(
-            f"📦 Export includes {len(filtered_data):,} rows, {filtered_data.shape[1]} columns, and a narrative summary."
+            f"Export includes {len(filtered_data):,} rows, {filtered_data.shape[1]} columns, "
+            f"and a narrative summary."
         )
 
+# ---------- HELP ----------
 with tab_help:
-    st.subheader("❓ How to Use This Dashboard")
+    st.subheader("How to Use This Dashboard")
     st.markdown(
-        "1. 📁 **Upload CSV** - Start by uploading your data file\n"
-        "2. 🧹 **Clean data** - Optionally clean data from the sidebar\n"
-        "3. 🎯 **Apply filters** - Filter categorical, numeric, and date columns\n"
-        "4. 📊 **Review insights** - Explore KPIs, visualizations, findings, and comparisons\n"
-        "5. 📥 **Export** - Download filtered data and summary artifacts"
+        "1. **Upload CSV** — Start by uploading your data file\n"
+        "2. **Clean data** — Optionally clean data from the sidebar\n"
+        "3. **Apply filters** — Filter categorical, numeric, and date columns\n"
+        "4. **Review insights** — Explore KPIs, visualizations, findings, and comparisons\n"
+        "5. **Export** — Download filtered data and summary artifacts"
     )
-    st.markdown("**⌨️ Keyboard-friendly tips**")
+
+    st.markdown("**Keyboard-friendly tips**")
     st.write("• Press `/` then type widget labels to jump quickly in browser search")
     st.write("• Use the clear-filter buttons when no rows match")
     st.write("• Keep filters narrow for focused insights, broad for trend analysis")
 
-    st.markdown("**📋 Expected input**")
+    st.markdown("**Expected input**")
     st.write("• CSV with headers")
     st.write("• Mixed data types are supported")
     st.write("• Datetime columns are auto-detected when parse confidence is high")
 
-    st.markdown("**🔧 Troubleshooting**")
+    st.markdown("**Troubleshooting**")
     st.write("• Upload errors: verify file is CSV and below 200MB")
     st.write("• Empty charts: verify required numeric/categorical columns exist")
     st.write("• Unexpected results: review cleaning history and active filters")
 
-    with st.expander("📖 View README", expanded=False):
+    with st.expander("View README", expanded=False):
         st.code(build_readme_text(), language="markdown")
