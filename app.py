@@ -554,6 +554,27 @@ def column_types(df: pd.DataFrame) -> tuple[list[str], list[str], list[str], lis
     numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
     datetime_cols = df.select_dtypes(include=["datetime64[ns]", "datetimetz"]).columns.tolist()
     categorical_cols = df.select_dtypes(include=["object", "category", "bool", "string"]).columns.tolist()
+
+    # Heuristic: reclassify low-cardinality numeric columns as categorical.
+    # Columns like "Tag" often hold values 1,2,3 that pandas reads as int
+    # but are really labels, not measurements.
+    reclassified: list[str] = []
+    for col in numeric_cols:
+        nunique = df[col].nunique(dropna=True)
+        n_rows = len(df)
+        # Few unique values AND column name hints at a label (or <= 12 distinct values
+        # in a dataset with > 20 rows → almost certainly categorical)
+        is_low_card = nunique <= 12 and n_rows > 20
+        name_hint = any(
+            kw in col.lower()
+            for kw in ["tag", "id", "code", "flag", "type", "class", "category", "label", "group", "level", "status"]
+        )
+        if is_low_card or name_hint:
+            reclassified.append(col)
+    for col in reclassified:
+        numeric_cols.remove(col)
+        categorical_cols.append(col)
+
     other_cols = [
         col for col in df.columns
         if col not in set(numeric_cols + datetime_cols + categorical_cols)
@@ -580,29 +601,29 @@ def dataset_overview_table(df: pd.DataFrame) -> pd.DataFrame:
     rec = [recommendation(str(dtype[col]), float(missing_pct[col])) for col in df.columns]
 
     overview = pd.DataFrame({
-        "column": df.columns,
-        "dtype": dtype.values,
-        "non_null": (df.shape[0] - missing).values,
-        "missing_count": missing.values,
-        "missing_pct": missing_pct.values,
-        "unique_values": unique_values.values,
-        "imputation_recommendation": rec,
+        "Column": df.columns,
+        "Data Type": dtype.values,
+        "Non-Null Count": (df.shape[0] - missing).values,
+        "Missing Count": missing.values,
+        "Missing %": missing_pct.values,
+        "Unique Values": unique_values.values,
+        "Suggested Fix": rec,
     })
-    return overview.sort_values(["missing_pct", "unique_values"], ascending=[False, False])
+    return overview.sort_values(["Missing %", "Unique Values"], ascending=[False, False])
 
 
 def numeric_stats(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
     if not numeric_cols:
-        return pd.DataFrame(columns=["column", "mean", "median", "std_dev", "min", "max"])
+        return pd.DataFrame(columns=["Column", "Mean", "Median", "Std Dev", "Min", "Max"])
     data = df[numeric_cols]
     stats = pd.DataFrame({
-        "mean": data.mean(numeric_only=True),
-        "median": data.median(numeric_only=True),
-        "std_dev": data.std(numeric_only=True),
-        "min": data.min(numeric_only=True),
-        "max": data.max(numeric_only=True),
+        "Mean": data.mean(numeric_only=True),
+        "Median": data.median(numeric_only=True),
+        "Std Dev": data.std(numeric_only=True),
+        "Min": data.min(numeric_only=True),
+        "Max": data.max(numeric_only=True),
     })
-    return stats.reset_index().rename(columns={"index": "column"})
+    return stats.reset_index().rename(columns={"index": "Column"})
 
 
 def find_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -703,8 +724,8 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
             if not rate.dropna().empty:
                 kpis.append((
                     "Battery Drop / 100 mi",
-                    f"{rate.dropna().mean():.2f}%",
-                    "Estimated battery percentage consumed per 100 miles",
+                    f"{rate.dropna().median():.2f}%",
+                    "Median battery % consumed per 100 mi (median is robust to outlier trips)",
                 ))
 
     if start_col and end_col:
@@ -1324,6 +1345,37 @@ if st.sidebar.button("Remove duplicate rows", use_container_width=True):
     st.session_state["cleaning_history"].append(
         f"Removed duplicates: {before:,} → {len(working_data):,} (removed {removed:,})"
     )
+
+with st.sidebar.expander("Remove outliers (IQR)", expanded=False):
+    st.caption("Removes extreme values using the Interquartile Range method. Works on any numeric column.")
+    _iqr_num_cols = working_data.select_dtypes(include=["number"]).columns.tolist()
+    iqr_cols = st.multiselect(
+        "Columns to check",
+        options=_iqr_num_cols,
+        default=[],
+        key="clean_iqr_cols",
+    )
+    iqr_factor = st.slider(
+        "Sensitivity (IQR multiplier)",
+        min_value=1.0, max_value=3.0, value=1.5, step=0.25,
+        key="clean_iqr_factor",
+        help="1.5 = standard (removes obvious outliers). Lower = more aggressive. Higher = more lenient.",
+    )
+    if st.button("Remove outliers", key="clean_apply_iqr", use_container_width=True):
+        before = len(working_data)
+        mask = pd.Series(True, index=working_data.index)
+        for col in iqr_cols:
+            q1 = working_data[col].quantile(0.25)
+            q3 = working_data[col].quantile(0.75)
+            iqr = q3 - q1
+            lower = q1 - iqr_factor * iqr
+            upper = q3 + iqr_factor * iqr
+            mask = mask & (working_data[col].between(lower, upper) | working_data[col].isna())
+        working_data = working_data[mask].copy()
+        removed = before - len(working_data)
+        st.session_state["cleaning_history"].append(
+            f"IQR outlier removal ({', '.join(iqr_cols)}): {before:,} → {len(working_data):,} (removed {removed:,})"
+        )
 
 with st.sidebar.expander("Fill missing values", expanded=False):
     numeric_strategy = st.selectbox(
