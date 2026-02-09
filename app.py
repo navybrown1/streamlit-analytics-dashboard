@@ -706,11 +706,18 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
         ))
 
     if avg_energy_col and pd.api.types.is_numeric_dtype(df[avg_energy_col]):
-        kpis.append((
-            "Avg Trip Efficiency",
-            f"{df[avg_energy_col].dropna().mean():.1f} Wh/mi",
-            "Lower Wh/mi usually indicates better efficiency",
-        ))
+        # Filter to plausible efficiency values (0-1200 Wh/mi) and trips > 0.2 mi
+        eff_series = df[avg_energy_col].dropna()
+        if distance_col and pd.api.types.is_numeric_dtype(df[distance_col]):
+            dist_mask = df[distance_col].fillna(0) > 0.2
+            eff_series = df.loc[dist_mask, avg_energy_col].dropna()
+        eff_series = eff_series[eff_series.between(0, 1200)]
+        if not eff_series.empty:
+            kpis.append((
+                "Avg Trip Efficiency",
+                f"{eff_series.median():.1f} Wh/mi",
+                "Median Wh/mi (excludes tiny trips and extreme outliers)",
+            ))
 
     if (
         start_battery_col and end_battery_col and distance_col
@@ -719,14 +726,23 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
         and pd.api.types.is_numeric_dtype(df[distance_col])
     ):
         subset = df[[start_battery_col, end_battery_col, distance_col]].dropna().copy()
-        subset = subset[subset[distance_col] > 0]
+        # Only use trips > 1 mile — short trips produce wildly inflated per-mile rates
+        subset = subset[subset[distance_col] > 1.0]
+        # Remove impossible battery values
+        subset = subset[
+            subset[start_battery_col].between(0, 100)
+            & subset[end_battery_col].between(0, 100)
+        ]
         if not subset.empty:
-            rate = ((subset[start_battery_col] - subset[end_battery_col]) / subset[distance_col]) * 100
+            drop_pct = subset[start_battery_col] - subset[end_battery_col]
+            rate = (drop_pct / subset[distance_col]) * 100
+            # Remove negative rates (battery gained during trip = regen/charging artifact)
+            rate = rate[rate >= 0]
             if not rate.dropna().empty:
                 kpis.append((
                     "Battery Drop / 100 mi",
                     f"{rate.dropna().median():.2f}%",
-                    "Median battery % consumed per 100 mi (median is robust to outlier trips)",
+                    "Median battery % per 100 mi (trips > 1 mi, excludes anomalies)",
                 ))
 
     if start_col and end_col:
