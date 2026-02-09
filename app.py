@@ -696,21 +696,44 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
     end_battery_col = find_column(cols, ["Ending Battery (%)", "end battery"])
     distance_col = find_column(cols, ["Distance (mi)", "distance"])
 
-    kpis.append(("Total Trips", f"{len(df):,}", "Total records in current cleaned dataset"))
+    # If data contains a Source File column (multi-CSV stack), detect record types
+    # and only compute drive-specific KPIs from rows that have Distance values.
+    has_source_col = "Source File" in cols
+    is_drive_data = distance_col is not None  # Has a Distance column → likely drives
+    is_charge_data = find_column(cols, ["Energy Added (kWh)", "energy added", "Charge Energy Added (kWh)"]) is not None
+
+    # Smart label: "Total Trips" for drives, "Total Records" for mixed/charges
+    record_label = "Total Records" if (is_charge_data and not is_drive_data) else "Total Trips"
+    if has_source_col:
+        source_counts = df["Source File"].value_counts()
+        source_summary = ", ".join(f"{name}: {count:,}" for name, count in source_counts.items())
+        kpis.append((record_label, f"{len(df):,}", f"By source: {source_summary}"))
+    else:
+        kpis.append((record_label, f"{len(df):,}", "Total records in current cleaned dataset"))
+
+    # For duration/efficiency/battery KPIs, only use drive rows when stacked with non-drive data.
+    # Drive rows are identified by having a non-null Distance value.
+    if distance_col and has_source_col:
+        drive_mask = df[distance_col].notna() & (df[distance_col] > 0)
+        kpi_df = df[drive_mask]
+    else:
+        kpi_df = df
 
     if duration_col and pd.api.types.is_numeric_dtype(df[duration_col]):
-        kpis.append((
-            "Avg Trip Duration",
-            f"{df[duration_col].dropna().mean():.1f} min",
-            "Average trip time across filtered dataset",
-        ))
+        dur_series = kpi_df[duration_col].dropna()
+        if not dur_series.empty:
+            kpis.append((
+                "Avg Trip Duration",
+                f"{dur_series.mean():.1f} min",
+                f"Average trip time ({len(dur_series):,} drive records)",
+            ))
 
     if avg_energy_col and pd.api.types.is_numeric_dtype(df[avg_energy_col]):
         # Filter to plausible efficiency values (0-1200 Wh/mi) and trips > 0.2 mi
-        eff_series = df[avg_energy_col].dropna()
-        if distance_col and pd.api.types.is_numeric_dtype(df[distance_col]):
-            dist_mask = df[distance_col].fillna(0) > 0.2
-            eff_series = df.loc[dist_mask, avg_energy_col].dropna()
+        eff_series = kpi_df[avg_energy_col].dropna()
+        if distance_col and pd.api.types.is_numeric_dtype(kpi_df[distance_col]):
+            dist_mask = kpi_df[distance_col].fillna(0) > 0.2
+            eff_series = kpi_df.loc[dist_mask, avg_energy_col].dropna()
         eff_series = eff_series[eff_series.between(0, 1200)]
         if not eff_series.empty:
             kpis.append((
@@ -721,11 +744,11 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
 
     if (
         start_battery_col and end_battery_col and distance_col
-        and pd.api.types.is_numeric_dtype(df[start_battery_col])
-        and pd.api.types.is_numeric_dtype(df[end_battery_col])
-        and pd.api.types.is_numeric_dtype(df[distance_col])
+        and pd.api.types.is_numeric_dtype(kpi_df[start_battery_col])
+        and pd.api.types.is_numeric_dtype(kpi_df[end_battery_col])
+        and pd.api.types.is_numeric_dtype(kpi_df[distance_col])
     ):
-        subset = df[[start_battery_col, end_battery_col, distance_col]].dropna().copy()
+        subset = kpi_df[[start_battery_col, end_battery_col, distance_col]].dropna().copy()
         # Only use trips > 1 mile — short trips produce wildly inflated per-mile rates
         subset = subset[subset[distance_col] > 1.0]
         # Remove impossible battery values
@@ -747,9 +770,9 @@ def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
 
     if start_col and end_col:
         route_series = (
-            df[start_col].fillna("(Missing)").astype(str)
+            kpi_df[start_col].fillna("(Missing)").astype(str)
             + " → "
-            + df[end_col].fillna("(Missing)").astype(str)
+            + kpi_df[end_col].fillna("(Missing)").astype(str)
         )
         if not route_series.empty:
             top_route = route_series.value_counts().head(1)
@@ -1322,38 +1345,57 @@ if len(parsed_frames) == 1:
 else:
     with col_upload_2:
         st.markdown(f"**{len(parsed_frames)} files uploaded:** {', '.join(file_names)}")
+
+        # Measure column overlap to guide the user
+        all_col_sets = [set(df.columns) for df in parsed_frames]
+        shared_cols_set = functools.reduce(lambda a, b: a & b, all_col_sets)
+        all_cols_set = functools.reduce(lambda a, b: a | b, all_col_sets)
+        overlap_pct = len(shared_cols_set) / max(len(all_cols_set), 1) * 100
+
+        if overlap_pct < 50:
+            st.warning(
+                f"These files share only **{overlap_pct:.0f}%** of their columns "
+                f"({len(shared_cols_set)} of {len(all_cols_set)}). "
+                "They likely contain different record types (e.g. drives vs charges). "
+                "**Merge on a shared column** is recommended over stacking."
+            )
+
         combine_mode = st.radio(
             "How should these files be combined?",
             options=["Stack rows (same or similar columns)", "Merge on a shared column"],
+            index=0 if overlap_pct >= 50 else 1,  # Default to merge when overlap is low
             key="csv_combine_mode",
             horizontal=True,
         )
         if combine_mode.startswith("Stack"):
+            # Tag each row with its source file so the user can filter later
+            for i, df_i in enumerate(parsed_frames):
+                df_i["Source File"] = file_names[i]
             data_raw = pd.concat(parsed_frames, ignore_index=True)
             st.success(
                 f"Stacked {len(parsed_frames)} files → {data_raw.shape[0]:,} rows, "
-                f"{data_raw.shape[1]} columns"
+                f"{data_raw.shape[1]} columns. "
+                f"Use the **Source File** filter in the sidebar to view each file separately."
             )
         else:
             # Find columns shared across ALL DataFrames
-            shared_cols = list(functools.reduce(
-                lambda a, b: a & b,
-                (set(df.columns) for df in parsed_frames),
-            ))
+            shared_cols = sorted(shared_cols_set)
             if not shared_cols:
                 st.error("No columns in common across all files. Use 'Stack rows' instead.")
                 st.stop()
             merge_key = st.selectbox(
                 "Merge key (column present in all files)",
-                options=sorted(shared_cols),
+                options=shared_cols,
                 key="csv_merge_key",
             )
-            data_raw = parsed_frames[0]
+            data_raw = parsed_frames[0].copy()
+            # Add source-specific suffixes based on filename (strip extension for readability)
             for i in range(1, len(parsed_frames)):
+                suffix = "_" + file_names[i].rsplit(".", 1)[0].split("-")[-1]  # e.g. "_charges"
                 data_raw = pd.merge(
                     data_raw, parsed_frames[i],
                     on=merge_key, how="outer",
-                    suffixes=("", f"_{file_names[i]}"),
+                    suffixes=("", suffix),
                 )
             st.success(
                 f"Merged on **{merge_key}** → {data_raw.shape[0]:,} rows, "
