@@ -445,8 +445,16 @@ def forecast_trend(
     })
 
     combined = pd.concat([hist, forecast], ignore_index=True)
-    combined["lower"] = combined["fitted"] - 1.96 * residual_std
-    combined["upper"] = combined["fitted"] + 1.96 * residual_std
+
+    # Widening confidence band: uncertainty grows with forecast horizon
+    horizon = np.zeros(len(combined))
+    n_hist = len(hist)
+    n_total = len(combined)
+    for i in range(n_hist, n_total):
+        horizon[i] = i - n_hist + 1
+    band_width = 1.96 * residual_std * np.sqrt(1 + horizon / max(1, n_hist))
+    combined["lower"] = combined["fitted"] - band_width
+    combined["upper"] = combined["fitted"] + band_width
 
     return combined, r_squared
 
@@ -2098,7 +2106,7 @@ with tab_ai:
 
     # ---- 4. TREND FORECASTING ----
     st.markdown("### 📈 Trend Forecasting")
-    st.caption("Polynomial regression forecast with confidence bands. No API key required.")
+    st.caption("Fits a trend line to past data and extends it forward. Best for smooth trends; weak for noisy metrics. No API key required.")
 
     if datetime_cols and numeric_cols and not filtered_data.empty:
         fc1, fc2, fc3, fc4 = st.columns([0.3, 0.3, 0.2, 0.2])
@@ -2178,12 +2186,23 @@ with tab_ai:
             fc_fig.update_layout(title=f"Forecast: {fc_val}")
             st.plotly_chart(update_chart_design(fc_fig, height=450), use_container_width=True)
 
-            if r_sq < 0.3:
-                st.caption("Low R-squared — the trend line is a weak fit. Consider a different metric or more data.")
-            elif r_sq > 0.7:
-                st.caption("Strong fit. Forecast confidence is relatively high for near-term projections.")
-            else:
+            # Plain English chart narration
+            st.info(
+                "**How to read this chart:** Dots are real data values. "
+                "The solid green line is the trend through the past. "
+                "The dashed orange line is the app's best guess going forward, "
+                "and the shaded band shows the range of likely values (wider = less certain)."
+            )
+
+            if r_sq < 0.2:
+                st.warning(
+                    f"⚠️ **Low R² ({r_sq:.3f}) — this metric is very noisy over time.** "
+                    "The forecast may not be useful. Try weekly/monthly averages or a different metric."
+                )
+            elif r_sq < 0.5:
                 st.caption("Moderate fit. Forecast is directionally useful but treat exact values with caution.")
+            else:
+                st.caption("Strong fit. Forecast confidence is relatively high for near-term projections.")
     else:
         st.info("Trend forecasting requires at least one datetime and one numeric column.")
 
