@@ -1332,10 +1332,13 @@ else:
                 options=sorted(shared_cols),
                 key="csv_merge_key",
             )
-            data_raw = functools.reduce(
-                lambda left, right: pd.merge(left, right, on=merge_key, how="outer", suffixes=("", f"_{file_names[parsed_frames.index(right)]}")),
-                parsed_frames,
-            )
+            data_raw = parsed_frames[0]
+            for i in range(1, len(parsed_frames)):
+                data_raw = pd.merge(
+                    data_raw, parsed_frames[i],
+                    on=merge_key, how="outer",
+                    suffixes=("", f"_{file_names[i]}"),
+                )
             st.success(
                 f"Merged on **{merge_key}** → {data_raw.shape[0]:,} rows, "
                 f"{data_raw.shape[1]} columns"
