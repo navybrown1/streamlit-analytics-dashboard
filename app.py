@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import io
 import json
 import os
@@ -1247,61 +1248,142 @@ st.markdown("""
 col_upload_1, col_upload_2 = st.columns([1, 2])
 with col_upload_1:
     st.markdown("### 📂 Data Import")
-    uploaded = st.file_uploader("Upload CSV file", type=["csv"], label_visibility="collapsed")
+    uploaded_files = st.file_uploader(
+        "Upload one or more CSV files",
+        type=["csv"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
+    session_file = st.file_uploader(
+        "Restore a previous session (optional)",
+        type=["json"],
+        key="session_restore_uploader",
+        help="Upload a dashboard_session.json file to restore cleaning history, business context, and AI chat.",
+    )
 
-if uploaded is None:
+if not uploaded_files:
     with col_upload_2:
         st.info(
-            "👋 **Welcome!** Upload a CSV file to begin. "
-            "The dashboard auto-detects schema, data types, and datetime columns."
+            "👋 **Welcome!** Upload one or more CSV files to begin. "
+            "The dashboard auto-detects schema, data types, and datetime columns. "
+            "Upload multiple files to stack or merge them."
         )
     st.stop()
 
-if uploaded.size > MAX_UPLOAD_MB * 1024 * 1024:
-    st.error(f"File exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
-    st.stop()
+# --- Parse each uploaded CSV ---
+parsed_frames: list[pd.DataFrame] = []
+parsed_metas: list[dict] = []
+file_names: list[str] = []
+for uf in uploaded_files:
+    if uf.size > MAX_UPLOAD_MB * 1024 * 1024:
+        st.error(f"**{uf.name}** exceeds {MAX_UPLOAD_MB}MB limit. Please upload a smaller CSV.")
+        st.stop()
+    try:
+        raw_bytes = uf.getvalue()
+        df_i, meta_i = read_csv_bytes(raw_bytes)
+    except Exception as exc:
+        st.error(f"Could not read **{uf.name}** as a CSV. Check delimiter, encoding, and file format.")
+        st.exception(exc)
+        st.stop()
+    if df_i is None or df_i.shape[1] == 0:
+        st.error(f"**{uf.name}** has no columns.")
+        st.stop()
+    if df_i.empty:
+        st.error(f"**{uf.name}** has no rows.")
+        st.stop()
+    df_i = df_i.dropna(how="all").copy()
+    if df_i.empty:
+        st.error(f"**{uf.name}** has no usable rows after removing empty rows.")
+        st.stop()
+    parsed_frames.append(df_i)
+    parsed_metas.append(meta_i)
+    file_names.append(uf.name)
 
-try:
-    with st.spinner("Reading your data..."):
-        raw_bytes = uploaded.getvalue()
-        data_raw, meta = read_csv_bytes(raw_bytes)
-except Exception as exc:
-    st.error("Could not read this file as a CSV. Check delimiter, encoding, and file format.")
-    st.exception(exc)
-    st.stop()
-
-if data_raw is None or data_raw.shape[1] == 0:
-    st.error("This CSV has no columns. Upload a valid dataset.")
-    st.stop()
-
-if data_raw.empty:
-    st.error("This CSV has no rows. Upload a non-empty dataset.")
-    st.stop()
-
-data_raw = data_raw.dropna(how="all").copy()
-if data_raw.empty:
-    st.error("No usable rows after removing fully empty rows.")
-    st.stop()
+# --- Combine mode (only when 2+ files) ---
+if len(parsed_frames) == 1:
+    data_raw = parsed_frames[0]
+    meta = parsed_metas[0]
+else:
+    with col_upload_2:
+        st.markdown(f"**{len(parsed_frames)} files uploaded:** {', '.join(file_names)}")
+        combine_mode = st.radio(
+            "How should these files be combined?",
+            options=["Stack rows (same or similar columns)", "Merge on a shared column"],
+            key="csv_combine_mode",
+            horizontal=True,
+        )
+        if combine_mode.startswith("Stack"):
+            data_raw = pd.concat(parsed_frames, ignore_index=True)
+            st.success(
+                f"Stacked {len(parsed_frames)} files → {data_raw.shape[0]:,} rows, "
+                f"{data_raw.shape[1]} columns"
+            )
+        else:
+            # Find columns shared across ALL DataFrames
+            shared_cols = list(functools.reduce(
+                lambda a, b: a & b,
+                (set(df.columns) for df in parsed_frames),
+            ))
+            if not shared_cols:
+                st.error("No columns in common across all files. Use 'Stack rows' instead.")
+                st.stop()
+            merge_key = st.selectbox(
+                "Merge key (column present in all files)",
+                options=sorted(shared_cols),
+                key="csv_merge_key",
+            )
+            data_raw = functools.reduce(
+                lambda left, right: pd.merge(left, right, on=merge_key, how="outer", suffixes=("", f"_{file_names[parsed_frames.index(right)]}")),
+                parsed_frames,
+            )
+            st.success(
+                f"Merged on **{merge_key}** → {data_raw.shape[0]:,} rows, "
+                f"{data_raw.shape[1]} columns"
+            )
+        st.caption(f"Combined columns: {', '.join(data_raw.columns[:20])}{'...' if data_raw.shape[1] > 20 else ''}")
+    meta = parsed_metas[0]  # Use first file's encoding/delimiter metadata
 
 data_raw, renamed_columns = make_unique_columns(data_raw)
 data_raw = coerce_datetime_columns(data_raw)
 
 # --- Session State Init ---
-dataset_token = f"{uploaded.name}:{uploaded.size}"
+dataset_token = "|".join(f"{uf.name}:{uf.size}" for uf in uploaded_files)
 if st.session_state.get("dataset_token") != dataset_token:
     st.session_state["dataset_token"] = dataset_token
     st.session_state["working_data"] = data_raw.copy()
     st.session_state["cleaning_history"] = []
 
-    default_source = "Tesla app CSV export" if "tesla" in uploaded.name.lower() else "Uploaded CSV file"
+    has_tesla = any("tesla" in fn.lower() for fn in file_names)
+    default_source = "Tesla app CSV export" if has_tesla else "Uploaded CSV file"
     st.session_state["src_system"] = default_source
-    st.session_state["src_export_date"] = guess_export_date(uploaded.name)
+    st.session_state["src_export_date"] = guess_export_date(file_names[0])
     st.session_state["src_owner"] = "Edwin Brown"
     st.session_state["src_url"] = "Local file upload"
     st.session_state["src_limitations"] = "Route names and tags may be user-entered and inconsistent."
 
 if renamed_columns:
     st.toast(f"Renamed {len(renamed_columns)} duplicate column(s) to avoid ambiguity", icon="⚠️")
+
+# --- Restore session from JSON (if provided) ---
+if session_file is not None:
+    _restore_token = f"session_restored_{session_file.name}:{session_file.size}"
+    if st.session_state.get("_session_restore_token") != _restore_token:
+        try:
+            _session_data = json.loads(session_file.getvalue().decode("utf-8"))
+            _RESTORABLE = [
+                "cleaning_history", "src_system", "src_export_date",
+                "src_owner", "src_url", "src_limitations", "ai_chat_history",
+            ]
+            restored_count = 0
+            for _rk in _RESTORABLE:
+                if _rk in _session_data:
+                    st.session_state[_rk] = _session_data[_rk]
+                    restored_count += 1
+            st.session_state["_session_restore_token"] = _restore_token
+            saved_at = _session_data.get("_saved_at", "unknown time")
+            st.toast(f"Session restored ({restored_count} fields from {saved_at})", icon="✅")
+        except Exception as _restore_err:
+            st.warning(f"Could not restore session: {_restore_err}")
 
 # =============================================================================
 # 4. SIDEBAR: AI CONFIG + CLEANING TOOLS
@@ -2307,15 +2389,47 @@ with tab_export:
             f"and a narrative summary."
         )
 
+    # --- Save / Load Session ---
+    st.markdown("---")
+    st.subheader("💾 Save / Load Session")
+    st.caption(
+        "Save your current session (cleaning history, business context, AI chat) to a JSON file. "
+        "Restore it later by uploading the file alongside your CSV."
+    )
+
+    # Collect session state to persist
+    _SESSION_KEYS = [
+        "cleaning_history", "src_system", "src_export_date",
+        "src_owner", "src_url", "src_limitations", "ai_chat_history",
+    ]
+    session_payload: dict = {}
+    for _sk in _SESSION_KEYS:
+        val = st.session_state.get(_sk)
+        if val is not None:
+            session_payload[_sk] = val
+    session_payload["_saved_at"] = datetime.now().isoformat()
+    session_payload["_app_version"] = "analytics-dashboard-v2"
+
+    session_json_str = json.dumps(session_payload, indent=2, default=str)
+    st.download_button(
+        "Save Session",
+        data=session_json_str,
+        file_name="dashboard_session.json",
+        mime="application/json",
+        use_container_width=True,
+        key="export_save_session",
+    )
+
 # ---------- HELP ----------
 with tab_help:
     st.subheader("How to Use This Dashboard")
     st.markdown(
-        "1. **Upload CSV** — Start by uploading your data file\n"
-        "2. **Clean data** — Optionally clean data from the sidebar\n"
-        "3. **Apply filters** — Filter categorical, numeric, and date columns\n"
-        "4. **Review insights** — Explore KPIs, visualizations, findings, and comparisons\n"
-        "5. **Export** — Download filtered data and summary artifacts"
+        "1. **Upload CSV(s)** — Upload one or more CSV files. Multiple files can be stacked (same columns) or merged (shared key column)\n"
+        "2. **Restore session** — Optionally upload a `dashboard_session.json` to restore a previous session's context and history\n"
+        "3. **Clean data** — Optionally clean data from the sidebar (remove outliers, fill missing, etc.)\n"
+        "4. **Apply filters** — Filter categorical, numeric, and date columns\n"
+        "5. **Review insights** — Explore KPIs, visualizations, findings, and comparisons\n"
+        "6. **Export & Save** — Download filtered data, summaries, and save your session for later"
     )
 
     st.markdown("**Keyboard-friendly tips**")
