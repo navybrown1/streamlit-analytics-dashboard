@@ -685,105 +685,144 @@ def guess_export_date(text: str) -> str:
 
 
 def calculate_business_kpis(df: pd.DataFrame) -> list[tuple[str, str, str]]:
+    """
+    Generate universal KPIs that work for ANY CSV dataset.
+    No hardcoded column names — purely statistical.
+    """
     kpis: list[tuple[str, str, str]] = []
-    cols = df.columns.tolist()
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    datetime_cols = df.select_dtypes(include=["datetime64[ns]", "datetimetz"]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category", "bool", "string"]).columns.tolist()
 
-    duration_col = find_column(cols, ["Duration (Minutes)", "duration"])
-    avg_energy_col = find_column(cols, ["Average Energy Used (Wh/mi)", "wh/mi", "energy used"])
-    start_col = find_column(cols, ["Starting Location", "start location"])
-    end_col = find_column(cols, ["Ending Location", "end location"])
-    start_battery_col = find_column(cols, ["Starting Battery (%)", "start battery"])
-    end_battery_col = find_column(cols, ["Ending Battery (%)", "end battery"])
-    distance_col = find_column(cols, ["Distance (mi)", "distance"])
-
-    # If data contains a Source File column (multi-CSV stack), detect record types
-    # and only compute drive-specific KPIs from rows that have Distance values.
-    has_source_col = "Source File" in cols
-    is_drive_data = distance_col is not None  # Has a Distance column → likely drives
-    is_charge_data = find_column(cols, ["Energy Added (kWh)", "energy added", "Charge Energy Added (kWh)"]) is not None
-
-    # Smart label: "Total Trips" for drives, "Total Records" for mixed/charges
-    record_label = "Total Records" if (is_charge_data and not is_drive_data) else "Total Trips"
-    if has_source_col:
+    # 1. Total records (with source breakdown if multi-CSV)
+    if "Source File" in df.columns:
         source_counts = df["Source File"].value_counts()
         source_summary = ", ".join(f"{name}: {count:,}" for name, count in source_counts.items())
-        kpis.append((record_label, f"{len(df):,}", f"By source: {source_summary}"))
+        kpis.append(("Total Records", f"{len(df):,}", f"By source: {source_summary}"))
     else:
-        kpis.append((record_label, f"{len(df):,}", "Total records in current cleaned dataset"))
+        kpis.append(("Total Records", f"{len(df):,}", "Total records after cleaning"))
 
-    # For duration/efficiency/battery KPIs, only use drive rows when stacked with non-drive data.
-    # Drive rows are identified by having a non-null Distance value.
-    if distance_col and has_source_col:
-        drive_mask = df[distance_col].notna() & (df[distance_col] > 0)
-        kpi_df = df[drive_mask]
-    else:
-        kpi_df = df
-
-    if duration_col and pd.api.types.is_numeric_dtype(df[duration_col]):
-        dur_series = kpi_df[duration_col].dropna()
-        if not dur_series.empty:
+    # 2. Date range (if datetime columns exist)
+    if datetime_cols:
+        dt_col = datetime_cols[0]
+        dt_series = df[dt_col].dropna()
+        if not dt_series.empty:
+            span_days = (dt_series.max() - dt_series.min()).days
             kpis.append((
-                "Avg Trip Duration",
-                f"{dur_series.mean():.1f} min",
-                f"Average trip time ({len(dur_series):,} drive records)",
+                "Date Range",
+                f"{span_days:,} days",
+                f"{dt_series.min().date()} to {dt_series.max().date()}",
             ))
 
-    if avg_energy_col and pd.api.types.is_numeric_dtype(df[avg_energy_col]):
-        # Filter to plausible efficiency values (0-1200 Wh/mi) and trips > 0.2 mi
-        eff_series = kpi_df[avg_energy_col].dropna()
-        if distance_col and pd.api.types.is_numeric_dtype(kpi_df[distance_col]):
-            dist_mask = kpi_df[distance_col].fillna(0) > 0.2
-            eff_series = kpi_df.loc[dist_mask, avg_energy_col].dropna()
-        eff_series = eff_series[eff_series.between(0, 1200)]
-        if not eff_series.empty:
+    # 3. Top numeric column: pick the one with the most variance (most interesting)
+    if numeric_cols:
+        # Find the numeric column with most meaningful data (non-constant, high fill rate)
+        best_col, best_score = None, -1.0
+        for col in numeric_cols:
+            series = df[col].dropna()
+            if len(series) < 5:
+                continue
+            fill_rate = len(series) / len(df)
+            cv = float(series.std() / abs(series.mean())) if series.mean() != 0 else 0.0
+            score = fill_rate * min(cv, 3.0)  # Balance fill rate with variability
+            if score > best_score:
+                best_score = score
+                best_col = col
+        if best_col:
+            med = df[best_col].dropna().median()
+            # Smart formatting: no decimals for large numbers, 1-2 for small
+            if abs(med) >= 100:
+                fmt_val = f"{med:,.0f}"
+            elif abs(med) >= 1:
+                fmt_val = f"{med:,.1f}"
+            else:
+                fmt_val = f"{med:,.3f}"
             kpis.append((
-                "Avg Trip Efficiency",
-                f"{eff_series.median():.1f} Wh/mi",
-                "Median Wh/mi (excludes tiny trips and extreme outliers)",
+                f"Median {best_col[:20]}",
+                fmt_val,
+                f"Median of most variable column ({df[best_col].dropna().count():,} values)",
             ))
 
-    if (
-        start_battery_col and end_battery_col and distance_col
-        and pd.api.types.is_numeric_dtype(kpi_df[start_battery_col])
-        and pd.api.types.is_numeric_dtype(kpi_df[end_battery_col])
-        and pd.api.types.is_numeric_dtype(kpi_df[distance_col])
-    ):
-        subset = kpi_df[[start_battery_col, end_battery_col, distance_col]].dropna().copy()
-        # Only use trips > 1 mile — short trips produce wildly inflated per-mile rates
-        subset = subset[subset[distance_col] > 1.0]
-        # Remove impossible battery values
-        subset = subset[
-            subset[start_battery_col].between(0, 100)
-            & subset[end_battery_col].between(0, 100)
-        ]
-        if not subset.empty:
-            drop_pct = subset[start_battery_col] - subset[end_battery_col]
-            rate = (drop_pct / subset[distance_col]) * 100
-            # Remove negative rates (battery gained during trip = regen/charging artifact)
-            rate = rate[rate >= 0]
-            if not rate.dropna().empty:
-                kpis.append((
-                    "Battery Drop / 100 mi",
-                    f"{rate.dropna().median():.2f}%",
-                    "Median battery % per 100 mi (trips > 1 mi, excludes anomalies)",
-                ))
+    # 4. Top categorical: most frequent value in the highest-cardinality cat column
+    if cat_cols:
+        best_cat = max(cat_cols, key=lambda c: df[c].nunique(dropna=True))
+        top_val = df[best_cat].value_counts().head(1)
+        if not top_val.empty:
+            pct = top_val.iloc[0] / len(df) * 100
+            kpis.append((
+                f"Top {best_cat[:18]}",
+                str(top_val.index[0])[:24],
+                f"{top_val.iloc[0]:,} occurrences ({pct:.1f}%)",
+            ))
 
-    if start_col and end_col:
-        route_series = (
-            kpi_df[start_col].fillna("(Missing)").astype(str)
-            + " → "
-            + kpi_df[end_col].fillna("(Missing)").astype(str)
-        )
-        if not route_series.empty:
-            top_route = route_series.value_counts().head(1)
-            if not top_route.empty:
-                kpis.append((
-                    "Most Frequent Route",
-                    top_route.index[0][:24],
-                    f"{int(top_route.iloc[0]):,} trip(s) for top route",
-                ))
+    # 5. Data completeness
+    completeness = (1 - df.isna().mean().mean()) * 100
+    kpis.append((
+        "Data Completeness",
+        f"{completeness:.1f}%",
+        f"Average fill rate across all {df.shape[1]} columns",
+    ))
 
     return kpis[:5]
+
+
+def generate_ai_kpis(
+    model, df: pd.DataFrame, numeric_cols: list[str],
+    categorical_cols: list[str], datetime_cols: list[str],
+) -> list[tuple[str, str, str]]:
+    """Use Gemini to generate smart, context-aware KPIs for any dataset."""
+    cols_info = []
+    for col in df.columns[:30]:  # Cap at 30 columns
+        dtype = str(df[col].dtype)
+        nunique = df[col].nunique(dropna=True)
+        sample_vals = df[col].dropna().head(3).tolist()
+        cols_info.append(f"  {col} ({dtype}, {nunique} unique): {sample_vals}")
+
+    prompt = (
+        "You are a data analyst. Given this dataset schema, generate exactly 5 KPI cards.\n"
+        f"Dataset: {df.shape[0]:,} rows, {df.shape[1]} columns.\n"
+        f"Columns:\n" + "\n".join(cols_info) + "\n\n"
+        "For each KPI, output exactly one line in this format:\n"
+        "LABEL | VALUE_EXPRESSION | HELP_TEXT\n\n"
+        "Rules:\n"
+        "- VALUE_EXPRESSION must be a pandas expression I can eval() on a DataFrame named 'df'.\n"
+        "  Examples: df['col'].mean(), df['col'].nunique(), len(df[df['col']>0])\n"
+        "- Use .median() over .mean() for robustness.\n"
+        "- Filter out obvious outliers (e.g., negative distances, impossible percentages).\n"
+        "- LABEL should be short (3-4 words max), human-friendly.\n"
+        "- HELP_TEXT should explain what the KPI means in plain English.\n"
+        "- Make KPIs meaningful for THIS specific data — not generic.\n"
+        "- Output ONLY the 5 lines, nothing else.\n"
+    )
+
+    try:
+        resp = model.generate_content(prompt, generation_config={"max_output_tokens": 500, "temperature": 0.2})
+        lines = [ln.strip() for ln in resp.text.strip().split("\n") if "|" in ln]
+
+        ai_kpis: list[tuple[str, str, str]] = []
+        for line in lines[:5]:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 3:
+                continue
+            label, expr, help_text = parts[0], parts[1], parts[2]
+            try:
+                result = eval(expr, {"__builtins__": {}, "df": df, "pd": pd, "np": np, "len": len, "abs": abs, "round": round})
+                # Format the result
+                if isinstance(result, float):
+                    if abs(result) >= 100:
+                        val_str = f"{result:,.0f}"
+                    elif abs(result) >= 1:
+                        val_str = f"{result:,.1f}"
+                    else:
+                        val_str = f"{result:,.3f}"
+                else:
+                    val_str = f"{result:,}" if isinstance(result, int) else str(result)[:24]
+                ai_kpis.append((label[:24], val_str, help_text))
+            except Exception:
+                continue  # Skip KPIs that fail to evaluate
+        return ai_kpis
+    except Exception:
+        return []
 
 
 def apply_fill_missing(
@@ -1383,24 +1422,68 @@ else:
             if not shared_cols:
                 st.error("No columns in common across all files. Use 'Stack rows' instead.")
                 st.stop()
+
+            # Rank merge key candidates: prefer datetime > high-uniqueness > others
+            # This prevents users from merging on low-cardinality columns like Duration
+            key_info: list[tuple[str, str, int]] = []
+            for col in shared_cols:
+                sample = parsed_frames[0][col]
+                nunique = int(sample.nunique(dropna=True))
+                is_dt = pd.api.types.is_datetime64_any_dtype(sample)
+                if is_dt:
+                    tag = f"datetime — {nunique:,} unique"
+                    rank = 0  # Best
+                elif nunique > len(sample) * 0.8:
+                    tag = f"high uniqueness — {nunique:,} unique"
+                    rank = 1
+                elif nunique > len(sample) * 0.3:
+                    tag = f"moderate uniqueness — {nunique:,} unique"
+                    rank = 2
+                else:
+                    tag = f"low uniqueness — {nunique:,} unique (may cause duplicate rows!)"
+                    rank = 3
+                key_info.append((col, tag, rank))
+            key_info.sort(key=lambda x: x[2])
+
             merge_key = st.selectbox(
                 "Merge key (column present in all files)",
-                options=shared_cols,
+                options=[k[0] for k in key_info],
+                format_func=lambda c: f"{c}  ({next(t for n, t, _ in key_info if n == c)})",
                 key="csv_merge_key",
             )
+
+            # Check for many-to-many risk
+            dup_counts = [int(df[merge_key].duplicated().sum()) for df in parsed_frames]
+            max_dups = max(dup_counts)
+            expected_sum = sum(len(df) for df in parsed_frames)
+            if max_dups > len(parsed_frames[0]) * 0.3:
+                st.warning(
+                    f"**{merge_key}** has many duplicate values ({max_dups:,} duplicates in the largest file). "
+                    "This will create a many-to-many join with potentially **far more rows** than expected. "
+                    "Consider using a datetime column or a more unique identifier."
+                )
+
             data_raw = parsed_frames[0].copy()
-            # Add source-specific suffixes based on filename (strip extension for readability)
             for i in range(1, len(parsed_frames)):
-                suffix = "_" + file_names[i].rsplit(".", 1)[0].split("-")[-1]  # e.g. "_charges"
+                suffix = "_" + file_names[i].rsplit(".", 1)[0].split("-")[-1]
                 data_raw = pd.merge(
                     data_raw, parsed_frames[i],
                     on=merge_key, how="outer",
                     suffixes=("", suffix),
                 )
-            st.success(
-                f"Merged on **{merge_key}** → {data_raw.shape[0]:,} rows, "
-                f"{data_raw.shape[1]} columns"
-            )
+
+            # Final sanity check: warn if result is much larger than inputs
+            if data_raw.shape[0] > expected_sum * 1.1:
+                st.error(
+                    f"Merge produced **{data_raw.shape[0]:,} rows** — much more than the "
+                    f"{expected_sum:,} combined input rows. This means **{merge_key}** is not a "
+                    "good merge key. Try a datetime column or a more unique identifier."
+                )
+            else:
+                st.success(
+                    f"Merged on **{merge_key}** → {data_raw.shape[0]:,} rows, "
+                    f"{data_raw.shape[1]} columns"
+                )
         st.caption(f"Combined columns: {', '.join(data_raw.columns[:20])}{'...' if data_raw.shape[1] > 20 else ''}")
     meta = parsed_metas[0]  # Use first file's encoding/delimiter metadata
 
@@ -1413,6 +1496,7 @@ if st.session_state.get("dataset_token") != dataset_token:
     st.session_state["dataset_token"] = dataset_token
     st.session_state["working_data"] = data_raw.copy()
     st.session_state["cleaning_history"] = []
+    st.session_state["ai_kpis"] = None  # Reset AI KPIs for new dataset
 
     has_tesla = any("tesla" in fn.lower() for fn in file_names)
     default_source = "Tesla app CSV export" if has_tesla else "Uploaded CSV file"
@@ -1685,6 +1769,27 @@ if kpis:
         kpi_cols[idx].metric(label, value, help=help_text)
 else:
     st.info("Insufficient data to generate KPIs.")
+
+# --- AI-Generated KPIs (contextual, data-specific) ---
+if HAS_GEMINI and get_gemini_key():
+    if st.session_state.get("ai_kpis") is None:
+        try:
+            _ai_model = init_gemini(get_gemini_key())
+            ai_kpis = generate_ai_kpis(
+                _ai_model, filtered_data, numeric_cols, categorical_cols, datetime_cols,
+            )
+            if ai_kpis:
+                st.session_state["ai_kpis"] = ai_kpis
+        except Exception:
+            pass  # Silently skip if API fails
+
+    if st.session_state.get("ai_kpis"):
+        st.markdown("##### 🤖 AI-Generated Insights")
+        ai_kpi_list = st.session_state["ai_kpis"]
+        ai_cols = st.columns(len(ai_kpi_list))
+        for idx, (label, value, help_text) in enumerate(ai_kpi_list):
+            ai_cols[idx].metric(label, value, help=help_text)
+        st.caption("Generated by Gemini based on your data's schema and values.")
 
 # --- Filter status ---
 full_rows = len(data)
