@@ -1,23 +1,6 @@
-# Virtual environment
-venv/
 .venv/
-env/
-
-# Python
 __pycache__/
-*.py[cod]
-*.pyo
-.Python
-*.egg-info/
-.eggs/
-dist/
-build/
-
-# Streamlit
-.streamlit/secrets.toml
-
-# IDE / OS
-.idea/
-.vscode/
+.pytest_cache/
+*.pyc
 .DS_Store
-*.log
+.streamlit/secrets.toml

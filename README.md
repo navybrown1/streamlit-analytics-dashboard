@@ -1,75 +1,146 @@
-# Business Analytics Dashboard
+# Document Intelligence Dashboard
 
-## Overview
-AI-powered interactive analytics dashboard for uploaded CSV files with business framing, data cleaning, filtering, visualizations, findings, comparison, anomaly detection, trend forecasting, and exports.
+Interactive Streamlit app that turns a source document (DOCX/PDF/TXT) into a clickable intelligence workspace with overview, outline navigation, entities/relationships, requirements rubric, visual insights, and grounded Q&A.
 
-## Live Demo
-**[Launch the app on Streamlit Cloud](https://app-analytics-dashboard-bk9byiwxmuvgemwedifjn7.streamlit.app/)**
+## Features
 
-## Sample Dataset
-Use any CSV file, or try one of these free public datasets:
-- [Tesla Trip Data (Kaggle)](https://www.kaggle.com/datasets) — search "Tesla trip data" or "EV trip logs"
-- [NYC Taxi Trip Data (sample)](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
-- [Superstore Sales (Kaggle)](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final) — classic business analytics dataset
+- 6 required tabs:
+  - Overview
+  - Outline Navigator
+  - Entities & Relationships
+  - Requirements / Rubric Builder
+  - Visual Insights
+  - Q&A Workbench
+- Global command palette trigger: `Ctrl+K` / `Cmd+K`
+- Click-through behavior from entities, requirements, and charts to source sections
+- Grounded Q&A with citations and refusal behavior for unsupported claims (`Not found in document`)
+- Export buttons for entities, requirements, and analysis summary
+- Runtime parsing cache and schema validation (Pydantic)
+- Graceful fallback for sparse/malformed structure
 
-Any CSV with headers will work. Best results with mixed numeric, categorical, and datetime columns.
+## Project Structure
 
-## Setup
+- `app.py` - Streamlit app UI
+- `src/models.py` - typed schema models
+- `src/parsers.py` - DOCX/PDF/TXT parsing and normalization
+- `src/sectionizer.py` - section detection heuristics
+- `src/extractors.py` - entities/requirements/relationships/insights
+- `src/qa.py` - grounded Q&A retrieval and refusal logic
+- `src/pipeline.py` - `analyze_document(...)` API
+- `src/exporters.py` - CSV/JSON/Markdown exports
+- `scripts/self_check.py` - acceptance-aligned pipeline checks
+- `tests/test_pipeline_validation.py` - lightweight tests
+- `run.sh` - one-command local launcher
+
+## Install
+
 ```bash
+cd /Users/edwinbrown/document-intelligence-dashboard
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run
+## Run (One Command)
+
 ```bash
-streamlit run app.py --server.port 8501 --server.address 127.0.0.1
+cd /Users/edwinbrown/document-intelligence-dashboard
+./run.sh --doc "/Users/edwinbrown/Downloads/STA 9708 LN3.1 Rules of Probability 2-10-2026.docx"
 ```
 
-## Expected Input Format
-- CSV file with headers (up to 200MB)
-- Mixed numeric, categorical, and datetime columns supported
-- Datetime columns are auto-detected when parse confidence exceeds 85%
-- Encoding fallbacks: UTF-8, UTF-8-SIG, Latin-1
-- Delimiter fallbacks: auto-detect, comma, semicolon, tab, pipe
+The script will:
+- create/reuse `.venv`
+- install dependencies
+- bind to `127.0.0.1`
+- start at port `3001` (auto-increments if busy)
 
-## Features
+## Where To Place Document
 
-### Core Analytics
-- Business question templates with decision-support framing
-- 5 auto-computed KPIs (trip count, duration, efficiency, battery drop, top route)
-- Data quality diagnostics: missing values, duplicates, column types, descriptive stats
-- Missing data heatmap visualization
-- Sidebar filters for categorical (multi-select + text search), numeric (range slider), and datetime columns
-- Plotly visualizations: histogram, bar chart, correlation heatmap, time series, scatter explorer
-- Filtered vs full dataset comparison with time period overlay and benchmark tracking
-- Auto-generated findings section with 7 data-grounded insights
-- Export: filtered CSV, JSON summary, HTML report, README template
+Default path loaded automatically:
 
-### AI-Powered (requires free Google Gemini API key)
-- Natural language data chat — ask questions about your data in plain English
-- One-click AI narrative report generation (executive summary, findings, recommendations)
-- Only column names, summary stats, and 5 sample rows are sent to the API — never the full dataset
+`/Users/edwinbrown/Downloads/STA 9708 LN3.1 Rules of Probability 2-10-2026.docx`
 
-### Built-in ML (no API key needed)
-- Anomaly detection via Isolation Forest (adjustable sensitivity)
-- Trend forecasting with polynomial regression and 95% confidence bands
+You can override via:
+- `./run.sh --doc /path/to/your/file`
+- or use in-app file upload.
 
-## AI Setup (Optional)
-To enable AI chat and reports, set your free Google Gemini API key:
+## Validation / Self-Check
 
-**Local:** Set environment variable `GOOGLE_API_KEY=your-key-here`
+Run acceptance-aligned checks:
 
-**Streamlit Cloud:** Add to Settings > Secrets:
-```toml
-GOOGLE_API_KEY = "your-key-here"
+```bash
+cd /Users/edwinbrown/document-intelligence-dashboard
+source .venv/bin/activate
+python scripts/self_check.py --doc "/Users/edwinbrown/Downloads/STA 9708 LN3.1 Rules of Probability 2-10-2026.docx"
+pytest -q
 ```
 
-Get a free key at [https://aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+## Deploy
 
-## Troubleshooting
-- **Upload errors:** Confirm file is CSV format and under 200MB
-- **Empty charts:** Verify required numeric/categorical columns exist after cleaning
-- **Empty results:** Use "Reset all filters" or loosen filter criteria
-- **AI errors:** Check that your Gemini API key is valid and has free-tier quota
-- **Unexpected results:** Review cleaning history and active filters in the Data Stats expander
+### GitHub
+
+```bash
+cd /Users/edwinbrown/document-intelligence-dashboard
+git init
+git add .
+git commit -m "Initial Document Intelligence Dashboard"
+gh repo create navybrown1/document-intelligence-dashboard --public --source=. --remote=origin --push
+```
+
+### Streamlit Community Cloud
+
+1. Open [share.streamlit.io](https://share.streamlit.io)
+2. Create a **new app** from `navybrown1/document-intelligence-dashboard`
+3. Branch: `main`
+4. Main file: `app.py`
+5. Deploy
+
+After first setup, pushes to `main` auto-redeploy.
+
+## Screenshot Instructions (Optional)
+
+- Start app with `./run.sh`
+- Open browser at shown local URL
+- Capture each tab for documentation:
+  - Overview
+  - Outline Navigator
+  - Entities & Relationships
+  - Requirements / Rubric Builder
+  - Visual Insights
+  - Q&A Workbench
+
+## Design Notes
+
+### Entity Extraction
+
+- Hybrid approach:
+  - Regex (dates, probability notation, fractions, set expressions)
+  - Lexical concept dictionary (mutually exclusive, union, intersection, etc.)
+  - Contextual cues (Prof/College, modal requirement signals)
+- Every entity stores citations with section + block snippet for jump navigation.
+
+### Requirements Detection
+
+- Sentence-level detection using modal/rule cues:
+  - `must`, `should`, `may`, `required`, `rule`, `defined as`, conditionals (`if...then`)
+- Priority mapping:
+  - `must/required` -> High
+  - `should` -> Medium
+  - `may` -> Low
+  - definitions/rules default -> Medium
+- Each requirement includes:
+  - rationale
+  - verification method
+  - citation link
+
+### Confidence and Risk Heuristics
+
+- Confidence flags:
+  - `explicit`: directly quoted or normative statement in source text
+  - `inferred`: synthesis from frequency or heuristic scoring
+- Risk/ambiguity scores by section:
+  - hedges (`may`, `might`, `could`)
+  - uncertainty markers (`not`, `?`, etc.)
+  - contrast terms (`however`, `but`, etc.)
+  - parse-confidence penalty when heading structure is weak
+
