@@ -1,846 +1,521 @@
 from __future__ import annotations
 
-import os
-import re
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import random
+from typing import List
 
-import networkx as nx
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
-from rapidfuzz import fuzz, process
-try:
-    from streamlit_js_eval import streamlit_js_eval
-except Exception:  # pragma: no cover - optional dependency behavior
-    streamlit_js_eval = None
 
-try:
-    from streamlit_plotly_events import plotly_events
-except Exception:  # pragma: no cover - optional dependency behavior
-    plotly_events = None
-
-try:
-    from streamlit_tree_select import tree_select
-except Exception:  # pragma: no cover - optional dependency behavior
-    tree_select = None
-
-from src.exporters import (
-    entities_to_dataframe,
-    export_entities_csv,
-    export_entities_json,
-    export_requirements_csv,
-    export_requirements_json,
-    export_summary_json,
-    export_summary_markdown,
-    requirements_to_dataframe,
-)
-from src.models import AnalysisResult, Citation, Entity, RequirementItem, Section
-from src.pipeline import analyze_document
-from src.qa import answer_question
+from src.vocab.engine import VocabAppEngine
+from src.vocab.models import GOAL_TO_CATEGORIES
+from src.vocab.quizzes import build_question
+from src.vocab.store import load_progress, save_progress
 
 
-CACHE_VERSION = "2026-02-11-1"
-DEFAULT_DOC_PATH = os.environ.get(
-    "DOCUMENT_PATH",
-    "/Users/edwinbrown/Downloads/STA 9708 LN3.1 Rules of Probability 2-10-2026.docx",
-)
+st.set_page_config(page_title="LexiLift", page_icon="📚", layout="wide")
 
 
-def init_state() -> None:
-    defaults = {
-        "selected_section_id": "",
-        "selected_entity_id": "",
-        "selected_requirement_id": "",
-        "outline_keyword": "",
-        "outline_section_types": [],
-        "outline_entity_types": [],
-        "command_palette_open": False,
-        "command_notice": "",
-        "qa_history": [],
-        "palette_query": "",
-        "last_cmdk_ts": "",
-    }
-    for key, value in defaults.items():
-        st.session_state.setdefault(key, value)
+def inject_theme(dark_mode: bool) -> None:
+    if dark_mode:
+        bg = "#0f1720"
+        panel = "#14202c"
+        text = "#eaf2f7"
+        soft = "#9eb4c5"
+    else:
+        bg = "#f3f6f8"
+        panel = "#ffffff"
+        text = "#0f202d"
+        soft = "#5f7282"
 
+    st.markdown(
+        f"""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 
-def highlight_text(text: str, terms: List[str]) -> str:
-    html = text
-    for term in terms:
-        term = term.strip()
-        if not term:
-            continue
-        pattern = re.compile(re.escape(term), re.IGNORECASE)
-        html = pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", html)
-    return html
-
-
-@st.cache_data(show_spinner=False)
-def load_analysis_from_bytes(file_bytes: bytes, filename: str, cache_version: str) -> AnalysisResult:
-    return analyze_document(file_bytes=file_bytes, filename=filename)
-
-
-@st.cache_data(show_spinner=False)
-def load_analysis_from_path(path: str, cache_version: str, mtime: float) -> AnalysisResult:
-    _ = mtime
-    return analyze_document(file_path=path)
-
-
-def get_analysis(uploaded_file) -> Tuple[Optional[AnalysisResult], Optional[str]]:
-    if uploaded_file is not None:
-        try:
-            data = uploaded_file.getvalue()
-            analysis = load_analysis_from_bytes(data, uploaded_file.name, CACHE_VERSION)
-            return analysis, uploaded_file.name
-        except Exception as exc:
-            st.error(f"Failed to parse uploaded file: {exc}")
-            with st.expander("Technical details"):
-                st.exception(exc)
-            return None, None
-
-    default = Path(DEFAULT_DOC_PATH)
-    if default.exists():
-        try:
-            analysis = load_analysis_from_path(str(default), CACHE_VERSION, default.stat().st_mtime)
-            return analysis, default.name
-        except Exception as exc:
-            st.error(f"Failed to parse default document: {exc}")
-            with st.expander("Technical details"):
-                st.exception(exc)
-            return None, None
-
-    return None, None
-
-
-def section_maps(analysis: AnalysisResult) -> Tuple[Dict[str, Section], Dict[str, object], Dict[str, List[Entity]]]:
-    section_by_id = {section.id: section for section in analysis.sections}
-    block_by_id = {block.id: block for block in analysis.blocks}
-    entities_by_section: Dict[str, List[Entity]] = {section.id: [] for section in analysis.sections}
-    for entity in analysis.entities:
-        seen = set()
-        for citation in entity.citations:
-            if citation.section_id in entities_by_section and citation.section_id not in seen:
-                entities_by_section[citation.section_id].append(entity)
-                seen.add(citation.section_id)
-    return section_by_id, block_by_id, entities_by_section
-
-
-def ensure_selected_section(analysis: AnalysisResult) -> str:
-    if not analysis.sections:
-        return ""
-    section_ids = {section.id for section in analysis.sections}
-    selected = st.session_state.get("selected_section_id", "")
-    if selected in section_ids:
-        return selected
-    fallback = analysis.sections[0].id
-    st.session_state["selected_section_id"] = fallback
-    return fallback
-
-
-def jump_to_citation(citation: Citation) -> None:
-    st.session_state["selected_section_id"] = citation.section_id
-
-
-def execute_command(command_value: str, analysis: AnalysisResult) -> None:
-    if command_value.startswith("section:"):
-        st.session_state["selected_section_id"] = command_value.split(":", 1)[1]
-        st.session_state["command_notice"] = "Section jump queued. Open Outline Navigator to view it."
-        return
-
-    if command_value.startswith("entity:"):
-        entity_id = command_value.split(":", 1)[1]
-        st.session_state["selected_entity_id"] = entity_id
-        entity = next((item for item in analysis.entities if item.id == entity_id), None)
-        if entity and entity.citations:
-            st.session_state["selected_section_id"] = entity.citations[0].section_id
-        st.session_state["command_notice"] = "Entity jump queued."
-        return
-
-    if command_value == "action:clear_filters":
-        st.session_state["outline_keyword"] = ""
-        st.session_state["outline_section_types"] = []
-        st.session_state["outline_entity_types"] = []
-        st.session_state["command_notice"] = "Filters cleared."
-        return
-
-    if command_value == "action:reset_jumps":
-        st.session_state["selected_entity_id"] = ""
-        st.session_state["selected_requirement_id"] = ""
-        st.session_state["command_notice"] = "Selection state reset."
-        return
-
-
-def build_command_options(analysis: AnalysisResult) -> List[Tuple[str, str]]:
-    options: List[Tuple[str, str]] = []
-    for section in analysis.sections:
-        options.append((f"Go to section: {section.title}", f"section:{section.id}"))
-    for entity in analysis.entities[:80]:
-        options.append((f"Go to entity: {entity.label} ({entity.type})", f"entity:{entity.id}"))
-    options.extend(
-        [
-            ("Action: Clear search filters", "action:clear_filters"),
-            ("Action: Reset jump selections", "action:reset_jumps"),
-        ]
-    )
-    return options
-
-
-def command_palette_ui(analysis: AnalysisResult) -> None:
-    components.html(
-        """
-        <script>
-        if (!window.parent.__docintelCmdkInstalled) {
-            window.parent.__docintelCmdkInstalled = true;
-            window.parent.document.addEventListener('keydown', function(event) {
-                const key = (event.key || '').toLowerCase();
-                if ((event.ctrlKey || event.metaKey) && key === 'k') {
-                    event.preventDefault();
-                    window.parent.localStorage.setItem('docintel_cmdk_ts', String(Date.now()));
-                }
-            });
-        }
-        </script>
+            .stApp {{
+                font-family: 'Manrope', sans-serif;
+                background: radial-gradient(circle at 5% 10%, #8fe7c8 0%, {bg} 42%);
+                color: {text};
+            }}
+            h1, h2, h3 {{
+                font-family: 'Space Grotesk', sans-serif;
+                letter-spacing: -0.02em;
+            }}
+            .glass-card {{
+                background: {panel};
+                border-radius: 18px;
+                border: 1px solid rgba(120, 145, 162, 0.22);
+                padding: 1rem 1.1rem;
+                box-shadow: 0 10px 35px rgba(20, 35, 45, 0.08);
+                margin-bottom: 0.75rem;
+                animation: riseIn 260ms ease-out;
+            }}
+            .meta-text {{ color: {soft}; font-size: 0.92rem; }}
+            .pill {{
+                display: inline-block;
+                border-radius: 999px;
+                padding: 0.15rem 0.55rem;
+                font-size: 0.78rem;
+                margin-right: 0.32rem;
+                margin-bottom: 0.2rem;
+                background: rgba(59, 160, 126, 0.14);
+                color: #1e7f61;
+            }}
+            .stButton > button {{
+                border-radius: 12px;
+                border: 1px solid rgba(120,145,162,0.25);
+                padding: 0.45rem 0.8rem;
+            }}
+            @keyframes riseIn {{
+                from {{ transform: translateY(8px); opacity: 0; }}
+                to {{ transform: translateY(0); opacity: 1; }}
+            }}
+        </style>
         """,
-        height=0,
-        width=0,
+        unsafe_allow_html=True,
     )
 
-    shortcut_fired = False
-    if streamlit_js_eval is not None:
-        event_stamp = streamlit_js_eval(
-            js_expressions="""
-            (function() {
-                const key = 'docintel_cmdk_ts';
-                const value = window.localStorage.getItem(key) || '';
-                if (value) { window.localStorage.removeItem(key); }
-                return value;
-            })()
-            """,
-            key="command_palette_shortcut_eval",
-        )
-        if event_stamp and str(event_stamp) != st.session_state.get("last_cmdk_ts", ""):
-            st.session_state["last_cmdk_ts"] = str(event_stamp)
-            shortcut_fired = True
 
-    opened = st.button(
-        "Open Command Palette (Ctrl/Cmd+K)",
-        key="command_palette_button",
-        type="secondary",
-        use_container_width=True,
+def ensure_session() -> None:
+    if "progress" not in st.session_state:
+        st.session_state.progress = load_progress()
+    if "selected_word" not in st.session_state:
+        st.session_state.selected_word = ""
+    if "quiz_question" not in st.session_state:
+        st.session_state.quiz_question = None
+    if "quiz_word_id" not in st.session_state:
+        st.session_state.quiz_word_id = ""
+    if "dark_mode" not in st.session_state:
+        st.session_state.dark_mode = False
+
+
+def mastery_color(mastery: float) -> str:
+    if mastery < 0.3:
+        return "#ef4444"
+    if mastery < 0.7:
+        return "#f59e0b"
+    return "#10b981"
+
+
+def render_word_card(engine: VocabAppEngine, word_id: str, include_actions: bool = True) -> None:
+    word = engine.word_map[word_id]
+    state = engine.progress.word_states[word_id]
+    c = mastery_color(state.mastery)
+
+    st.markdown(
+        f"""
+        <div class='glass-card'>
+            <h4 style='margin:0'>{word.word} <span class='meta-text'>/ {word.pronunciation} /</span></h4>
+            <p class='meta-text' style='margin:0.2rem 0'>{word.part_of_speech} • {word.category} • {word.difficulty}</p>
+            <p style='margin-top:0.35rem'><b>{word.simple_definition}</b></p>
+            <p class='meta-text' style='margin-top:-0.4rem'>Mastery: <span style='color:{c}'>{engine.mastery_text(word_id)} ({state.mastery:.0%})</span></p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    if opened or shortcut_fired:
-        st.session_state["command_palette_open"] = True
 
-    if not st.session_state.get("command_palette_open"):
-        return
-
-    with st.container(border=True):
-        st.markdown("### Command Palette")
-        query = st.text_input("Search commands", key="palette_query")
-        command_options = build_command_options(analysis)
-        labels = [label for label, _ in command_options]
-
-        if query.strip():
-            results = process.extract(query, labels, scorer=fuzz.WRatio, limit=12)
-            labels = [label for label, _, _ in results]
-
-        if not labels:
-            st.info("No matching commands.")
-        else:
-            selected_label = st.selectbox("Command", labels, key="palette_selected")
-            command_value = next(value for label, value in command_options if label == selected_label)
-            col_run, col_close = st.columns([1, 1])
-            with col_run:
-                if st.button("Run Command", use_container_width=True):
-                    execute_command(command_value, analysis)
-            with col_close:
-                if st.button("Close Palette", use_container_width=True):
-                    st.session_state["command_palette_open"] = False
-                    st.session_state["palette_query"] = ""
+    if include_actions:
+        cols = st.columns([1, 1, 1])
+        if cols[0].button("Open details", key=f"detail_{word_id}"):
+            st.session_state.selected_word = word_id
+        if cols[1].button("Mark learned", key=f"learned_{word_id}"):
+            engine.mark_learned(word_id)
+            save_progress(engine.progress)
+            st.success(f"{word.word} marked as learned.")
+        if cols[2].button("Favorite", key=f"fav_{word_id}"):
+            engine.toggle_favorite(word_id)
+            save_progress(engine.progress)
 
 
-def render_overview_tab(analysis: AnalysisResult) -> None:
-    st.subheader("Executive Summary")
-    st.write(analysis.summary or "No summary generated.")
+def screen_onboarding(engine: VocabAppEngine) -> None:
+    st.title("Welcome to LexiLift")
+    st.caption("A premium daily vocabulary trainer built for active recall and long-term retention.")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### Key Takeaways")
-        if analysis.takeaways:
-            for idx, takeaway in enumerate(analysis.takeaways[:8], start=1):
-                st.markdown(
-                    f"{idx}. {takeaway.text}  \n"
-                    f"`{takeaway.confidence}` | Source: `{takeaway.citation.section_title}`"
-                )
-                if st.button(
-                    f"Jump to source ({idx})",
-                    key=f"takeaway_jump_{idx}",
-                ):
-                    jump_to_citation(takeaway.citation)
-        else:
-            st.info("No takeaways extracted.")
-
-    with c2:
-        st.markdown("#### Confidence Flags")
-        if analysis.confidence_flags:
-            for idx, flag in enumerate(analysis.confidence_flags[:8], start=1):
-                st.caption(
-                    f"[{flag.confidence}] {flag.statement}\nReason: {flag.reason}\nSource: {flag.citation.section_title}"
-                )
-        else:
-            st.info("No confidence flags available.")
-
-    st.markdown("#### Summary Exports")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.download_button(
-            "Export Analysis Summary (JSON)",
-            data=export_summary_json(analysis),
-            file_name="analysis_summary.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-    with col2:
-        st.download_button(
-            "Export Analysis Summary (Markdown)",
-            data=export_summary_markdown(analysis),
-            file_name="analysis_summary.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
-
-
-def render_outline_tab(analysis: AnalysisResult, section_by_id: Dict[str, Section], block_by_id: Dict[str, object], entities_by_section: Dict[str, List[Entity]]) -> None:
-    all_section_types = sorted({section.section_type for section in analysis.sections})
-    all_entity_types = sorted({entity.type for entity in analysis.entities})
-
-    col_filters = st.columns([2, 2, 2])
-    with col_filters[0]:
-        st.session_state["outline_keyword"] = st.text_input(
-            "Keyword",
-            value=st.session_state.get("outline_keyword", ""),
-            key="outline_keyword_input",
-        )
-    with col_filters[1]:
-        st.session_state["outline_section_types"] = st.multiselect(
-            "Section Type",
-            all_section_types,
-            default=st.session_state.get("outline_section_types", []),
-            key="outline_section_types_input",
-        )
-    with col_filters[2]:
-        st.session_state["outline_entity_types"] = st.multiselect(
-            "Entity Type",
-            all_entity_types,
-            default=st.session_state.get("outline_entity_types", []),
-            key="outline_entity_types_input",
-        )
-
-    keyword = st.session_state.get("outline_keyword", "").strip().lower()
-    selected_section_types = set(st.session_state.get("outline_section_types", []))
-    selected_entity_types = set(st.session_state.get("outline_entity_types", []))
-
-    filtered_sections: List[Section] = []
-    for section in analysis.sections:
-        if selected_section_types and section.section_type not in selected_section_types:
-            continue
-        if keyword and keyword not in section.title.lower() and keyword not in section.text.lower():
-            continue
-        if selected_entity_types:
-            section_entities = entities_by_section.get(section.id, [])
-            if not any(entity.type in selected_entity_types for entity in section_entities):
-                continue
-        filtered_sections.append(section)
-
-    if not filtered_sections:
-        st.warning("No sections matched your filters.")
-        return
-
-    left, right = st.columns([1, 2])
-
-    selected_section_id = ensure_selected_section(analysis)
-
+    left, right = st.columns([1.2, 1])
     with left:
-        st.markdown("#### Outline Tree")
-        nodes = [
-            {
-                "label": section.title,
-                "value": section.id,
-                "children": [],
-                "expanded": True,
-            }
-            for section in filtered_sections
-        ]
-        if tree_select is not None:
-            tree = tree_select(
-                nodes,
-                checked=[selected_section_id] if selected_section_id in [s.id for s in filtered_sections] else [],
-                expanded=[node["value"] for node in nodes],
-                no_cascade=True,
-                key="outline_tree",
-            )
-            checked = tree.get("checked", []) if isinstance(tree, dict) else []
-            if checked:
-                st.session_state["selected_section_id"] = checked[0]
-                selected_section_id = checked[0]
-        else:
-            section_titles = [section.title for section in filtered_sections]
-            id_by_title = {section.title: section.id for section in filtered_sections}
-            current_title = next(
-                (section.title for section in filtered_sections if section.id == selected_section_id),
-                section_titles[0],
-            )
-            title = st.selectbox("Section", section_titles, index=section_titles.index(current_title))
-            st.session_state["selected_section_id"] = id_by_title[title]
-            selected_section_id = id_by_title[title]
+        st.markdown("### Personalize your learning path")
+        name = st.text_input("Display name", value=engine.progress.profile_name)
+        goal = st.selectbox("Learning goal", list(GOAL_TO_CATEGORIES.keys()), index=list(GOAL_TO_CATEGORIES.keys()).index(engine.progress.goal))
+        daily_goal = st.slider("Daily word target", min_value=5, max_value=20, value=engine.progress.daily_goal)
+
+        if st.button("Start Learning", type="primary"):
+            engine.progress.profile_name = name.strip() or "Learner"
+            engine.progress.goal = goal
+            engine.progress.daily_goal = daily_goal
+            save_progress(engine.progress)
+            st.success("Onboarding completed. Visit Home Dashboard.")
 
     with right:
-        section = section_by_id.get(selected_section_id)
-        if not section:
-            section = filtered_sections[0]
-            st.session_state["selected_section_id"] = section.id
-
-        st.markdown(f"#### {section.title}")
-        selected_entity = next((e for e in analysis.entities if e.id == st.session_state.get("selected_entity_id")), None)
-        terms = []
-        if keyword:
-            terms.append(keyword)
-        if selected_entity:
-            terms.append(selected_entity.label)
-
-        for block_id in section.block_ids:
-            block = block_by_id.get(block_id)
-            if not block:
-                continue
-            rendered = highlight_text(block.text, terms)
-            st.markdown(f"<div><strong>[{block.index}]</strong> {rendered}</div>", unsafe_allow_html=True)
-
-        st.caption(
-            f"Section confidence: {section.parse_confidence:.2f} | "
-            f"Risk: {section.risk_score:.2f} | Ambiguity: {section.ambiguity_score:.2f}"
-        )
+        st.markdown("### What you get")
+        st.markdown("- Daily feed curated to your goal")
+        st.markdown("- Spaced repetition with adaptive intervals")
+        st.markdown("- XP, streaks, badges, and weekly challenge")
+        st.markdown("- Quiz modes: multiple-choice, matching, fill blank, context")
+        st.markdown("- Progress analytics, weak area detection, and review planner")
 
 
-def build_relationship_figure(analysis: AnalysisResult) -> Tuple[go.Figure, List[str]]:
-    graph = nx.Graph()
-    node_labels: Dict[str, str] = {}
+def screen_home(engine: VocabAppEngine) -> None:
+    snap = engine.progress_snapshot()
+    st.title("Home Dashboard")
 
-    for section in analysis.sections:
-        graph.add_node(section.id, node_type="section")
-        node_labels[section.id] = section.title
+    a, b, c, d, e = st.columns(5)
+    a.metric("Level", f"{engine.progress.level}")
+    b.metric("Rank", snap["rank"])
+    c.metric("XP", f"{engine.progress.xp}/{snap['xp_to_next']}")
+    d.metric("Streak", f"{engine.progress.streak_days} days")
+    e.metric("Due Reviews", snap["due_reviews"])
 
-    for entity in analysis.entities[:80]:
-        graph.add_node(entity.id, node_type="entity")
-        node_labels[entity.id] = f"{entity.label} ({entity.type})"
+    x = min(1.0, engine.progress.completed_today / max(1, engine.progress.daily_goal))
+    st.progress(x, text=f"Daily goal progress: {engine.progress.completed_today}/{engine.progress.daily_goal}")
 
-    for edge in analysis.relationships:
-        if edge.relation != "section_contains_entity":
-            continue
-        if edge.source in graph.nodes and edge.target in graph.nodes:
-            graph.add_edge(edge.source, edge.target, weight=edge.weight)
-
-    if graph.number_of_nodes() == 0:
-        return go.Figure(), []
-
-    pos = nx.spring_layout(graph, seed=42)
-    edge_x: List[float] = []
-    edge_y: List[float] = []
-    for source, target in graph.edges():
-        x0, y0 = pos[source]
-        x1, y1 = pos[target]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-
-    edge_trace = go.Scatter(
-        x=edge_x,
-        y=edge_y,
-        line={"width": 0.6, "color": "#9ca3af"},
-        hoverinfo="none",
-        mode="lines",
-    )
-
-    node_x: List[float] = []
-    node_y: List[float] = []
-    hover_text: List[str] = []
-    node_color: List[str] = []
-    node_size: List[int] = []
-    node_order: List[str] = []
-
-    for node, data in graph.nodes(data=True):
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_order.append(node)
-        if data.get("node_type") == "section":
-            node_color.append("#2563eb")
-            node_size.append(19)
+    c1, c2 = st.columns([1.4, 1])
+    with c1:
+        st.markdown("### Today challenge")
+        due = engine.due_reviews()[:4]
+        if due:
+            st.info(f"Complete {len(due)} due reviews and one quiz streak of 5 to unlock +120 bonus XP.")
         else:
-            node_color.append("#d97706")
-            node_size.append(13)
-        hover_text.append(node_labels[node])
+            st.success("No due reviews. Push mastery with fresh daily words.")
 
-    node_trace = go.Scatter(
-        x=node_x,
-        y=node_y,
-        mode="markers",
-        marker={"color": node_color, "size": node_size, "line": {"width": 1, "color": "#111827"}},
-        hovertext=hover_text,
-        hoverinfo="text",
-        customdata=node_order,
-    )
+        st.markdown("### Words you almost know")
+        for word in engine.words_almost_known():
+            state = engine.progress.word_states[word.id]
+            st.write(f"{word.word} • {state.mastery:.0%} mastery • next review day {state.due_day}")
 
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            showlegend=False,
-            hovermode="closest",
-            margin={"b": 0, "l": 0, "r": 0, "t": 0},
-            xaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
-            yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
-            height=520,
-        ),
-    )
-
-    return fig, node_order
+    with c2:
+        st.markdown("### Achievements")
+        for badge in snap["badges"] or ["No badges yet. Keep learning daily."]:
+            st.markdown(f"- {badge}")
+        st.markdown("### Reminder")
+        st.caption("Notification placeholder: Daily reminder at 8:00 PM local time.")
+        if st.button("Advance to next day"):
+            engine.start_new_day()
+            save_progress(engine.progress)
+            st.experimental_rerun()
 
 
-def render_entities_tab(analysis: AnalysisResult) -> None:
-    st.markdown("#### Entity Explorer")
-    entity_df = entities_to_dataframe(analysis)
-    if entity_df.empty:
-        st.info("No entities detected for this document.")
+def screen_daily_words(engine: VocabAppEngine) -> None:
+    st.title("Daily Words")
+    st.caption("Active recall feed with reveal-first interactions.")
+
+    feed = engine.daily_feed(limit=engine.progress.daily_goal)
+    if not feed:
+        st.info("All words are mastered. Great work.")
         return
 
-    col_table, col_detail = st.columns([1.3, 1])
-
-    selected_entity: Optional[Entity] = None
-
-    with col_table:
-        st.dataframe(entity_df, use_container_width=True, hide_index=True)
-        entity_options = [f"{entity.label} ({entity.type})" for entity in analysis.entities]
-        default_idx = 0
-        if st.session_state.get("selected_entity_id"):
-            for idx, entity in enumerate(analysis.entities):
-                if entity.id == st.session_state["selected_entity_id"]:
-                    default_idx = idx
-                    break
-        selected_label = st.selectbox("Inspect entity", entity_options, index=default_idx)
-        selected_entity = analysis.entities[entity_options.index(selected_label)]
-        st.session_state["selected_entity_id"] = selected_entity.id
-
-        cexp1, cexp2 = st.columns(2)
-        with cexp1:
-            st.download_button(
-                "Export Entities CSV",
-                data=export_entities_csv(analysis),
-                file_name="entities.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-        with cexp2:
-            st.download_button(
-                "Export Entities JSON",
-                data=export_entities_json(analysis),
-                file_name="entities.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-
-    with col_detail:
-        if selected_entity:
-            st.markdown(f"**Label:** {selected_entity.label}")
-            st.markdown(f"**Type:** `{selected_entity.type}`")
-            st.markdown(f"**Mentions:** {selected_entity.mentions_count}")
-            st.markdown(f"**First occurrence:** {selected_entity.first_occurrence}")
-            st.markdown(f"**Last occurrence:** {selected_entity.last_occurrence}")
-            st.markdown("**Source sections:**")
-            for section in selected_entity.source_sections:
-                st.caption(f"- {section}")
-            for idx, citation in enumerate(selected_entity.citations[:4], start=1):
-                st.caption(f"[{idx}] {citation.section_title}: {citation.snippet}")
-                if st.button(f"Jump to citation {idx}", key=f"entity_jump_{selected_entity.id}_{idx}"):
-                    jump_to_citation(citation)
-
-    st.markdown("#### Relationship Graph")
-    graph_fig, node_order = build_relationship_figure(analysis)
-    if graph_fig.data:
-        if plotly_events:
-            selected = plotly_events(
-                graph_fig,
-                click_event=True,
-                hover_event=True,
-                key="relationship_graph",
-                override_height=520,
-            )
-            if selected:
-                point_index = selected[0].get("pointIndex")
-                if point_index is not None and 0 <= point_index < len(node_order):
-                    node_id = node_order[point_index]
-                    if node_id.startswith("s"):
-                        st.session_state["selected_section_id"] = node_id
-                    elif node_id.startswith("ent_"):
-                        st.session_state["selected_entity_id"] = node_id
-                        entity = next((item for item in analysis.entities if item.id == node_id), None)
-                        if entity and entity.citations:
-                            st.session_state["selected_section_id"] = entity.citations[0].section_id
+    for idx, word in enumerate(feed):
+        st.markdown(f"### {idx + 1}. {word.word}")
+        show_def = st.toggle("Tap to reveal definition", key=f"reveal_{word.id}")
+        if show_def:
+            render_word_card(engine, word.id)
         else:
-            st.plotly_chart(graph_fig, use_container_width=True)
-            st.caption("Install streamlit-plotly-events for clickable graph points.")
+            st.markdown(
+                "<div class='glass-card'><p class='meta-text'>Try to recall the meaning before revealing.</p></div>",
+                unsafe_allow_html=True,
+            )
+
+        usage = st.text_input(f"Use '{word.word}' in a sentence", key=f"usage_{word.id}")
+        if st.button("Submit usage", key=f"submit_usage_{word.id}"):
+            score = 4 if word.word.lower() in usage.lower() else 2
+            engine.record_result(word.id, quality=score, source="usage")
+            save_progress(engine.progress)
+            if score >= 4:
+                st.success("Great context usage. Memory reinforced.")
+            else:
+                st.warning("Try including the target word naturally in your sentence.")
+
+
+def screen_word_detail(engine: VocabAppEngine) -> None:
+    st.title("Word Detail")
+
+    options = [w.id for w in engine.words]
+    labels = {w.id: w.word for w in engine.words}
+    current = st.session_state.selected_word or options[0]
+    chosen = st.selectbox("Select word", options=options, index=options.index(current), format_func=lambda x: labels[x])
+    st.session_state.selected_word = chosen
+
+    word = engine.word_map[chosen]
+    state = engine.progress.word_states[chosen]
+
+    st.markdown(f"## {word.word}  ")
+    st.markdown(f"**Pronunciation:** {word.pronunciation}")
+    st.markdown(f"**Part of speech:** {word.part_of_speech}")
+    st.markdown(f"**Simple definition:** {word.simple_definition}")
+    st.markdown(f"**Advanced definition:** {word.advanced_definition}")
+    st.markdown(f"**Example:** {word.example_sentence}")
+    st.markdown(f"**Synonyms:** {', '.join(word.synonyms)}")
+    st.markdown(f"**Antonyms:** {', '.join(word.antonyms)}")
+    st.markdown(f"**Etymology:** {word.etymology}")
+    st.markdown(f"**Difficulty:** {word.difficulty}")
+    st.markdown(f"**Memory tip:** {word.memory_tip}")
+    st.markdown(f"**Commonly confused with:** {', '.join(word.confused_with)}")
+    st.markdown(f"**Mastery:** {state.mastery:.0%} ({engine.mastery_text(chosen)})")
+
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("Save favorite"):
+        engine.toggle_favorite(chosen)
+        save_progress(engine.progress)
+    if c2.button("Mark as learned"):
+        engine.mark_learned(chosen)
+        save_progress(engine.progress)
+    list_name = c3.text_input("Custom list name", value="My Core List", key="detail_custom_list")
+    if c4.button("Add to custom list"):
+        engine.add_to_custom_list(list_name.strip() or "My Core List", chosen)
+        save_progress(engine.progress)
+
+    if st.button("Text-to-speech placeholder"):
+        st.info("TTS integration placeholder: hook this button to a backend speech API later.")
+
+
+def screen_quiz(engine: VocabAppEngine) -> None:
+    st.title("Quiz Mode")
+    st.caption("Multiple choice, matching, fill-in-the-blank, and context challenge.")
+
+    available = engine.daily_feed(limit=12)
+    if not available:
+        st.info("No quiz candidates available.")
+        return
+
+    col1, col2 = st.columns([1, 1])
+    selected_type = col1.selectbox("Quiz type", ["random", "multiple_choice", "fill_blank", "context_choice", "matching"])
+
+    if st.session_state.quiz_question is None or st.button("New Question", key="new_quiz_q"):
+        target = random.choice(available)
+        q = build_question(target, available, None if selected_type == "random" else selected_type)
+        st.session_state.quiz_question = q
+        st.session_state.quiz_word_id = target.id
+
+    q = st.session_state.quiz_question
+    target_id = st.session_state.quiz_word_id
+    st.markdown(f"### {q['prompt']}")
+
+    if q["type"] in {"multiple_choice", "context_choice"}:
+        answer = st.radio("Choose answer", q["options"], key="quiz_choice")
+        if st.button("Submit answer", type="primary"):
+            correct = answer == q["answer"]
+            engine.record_result(target_id, 5 if correct else 2, source="quiz")
+            save_progress(engine.progress)
+            if correct:
+                st.success("Correct. Spaced interval extended.")
+            else:
+                st.error(f"Not quite. Correct answer: {q['answer']}")
+
+    elif q["type"] == "fill_blank":
+        answer = st.text_input("Your answer", key="quiz_fill")
+        if st.button("Submit fill", type="primary"):
+            correct = answer.strip().lower() == str(q["answer"]).strip().lower()
+            engine.record_result(target_id, 5 if correct else 1, source="quiz")
+            save_progress(engine.progress)
+            if correct:
+                st.success("Correct. Nice recall.")
+            else:
+                st.error(f"Expected: {q['answer']}")
+
     else:
-        st.info("Relationship graph is empty for this document.")
+        st.write("Match each word with one definition.")
+        for left in q["left"]:
+            choice = st.selectbox(f"Definition for {left}", q["right"], key=f"match_{left}")
+            if st.button(f"Check {left}", key=f"check_{left}"):
+                correct = choice == q["answer_pairs"][left]
+                engine.record_result(target_id, 4 if correct else 2, source="quiz")
+                save_progress(engine.progress)
+                if correct:
+                    st.success("Correct match.")
+                else:
+                    st.warning("Try again.")
+
+    st.markdown("### Build a sentence mini game")
+    sentence = st.text_area("Write one sentence with the current target word.", key="sentence_mini")
+    if st.button("Evaluate sentence"):
+        word = engine.word_map[target_id].word.lower()
+        if word in sentence.lower() and len(sentence.split()) > 6:
+            st.success("Strong sentence. You earn +30 bonus XP.")
+            engine.progress.xp += 30
+            engine.level_up_if_needed()
+            save_progress(engine.progress)
+        else:
+            st.info("Try writing a longer sentence including the target word.")
 
 
-def render_requirements_tab(analysis: AnalysisResult) -> None:
-    st.markdown("#### Requirements Checklist")
-    req_df = requirements_to_dataframe(analysis)
-    if req_df.empty:
-        st.info("No requirement/rule statements detected.")
-    else:
-        priority_filter = st.multiselect(
-            "Priority",
-            sorted(req_df["priority"].unique()),
-            default=sorted(req_df["priority"].unique()),
-        )
-        filtered = req_df[req_df["priority"].isin(priority_filter)]
-        st.dataframe(filtered, use_container_width=True, hide_index=True)
+def screen_review(engine: VocabAppEngine) -> None:
+    st.title("Review Mode")
+    due = engine.due_reviews()
+    st.caption(f"{len(due)} reviews due today.")
 
-        for _, row in filtered.iterrows():
-            with st.expander(f"{row['id']} | {row['priority']} | {row['section_title']}"):
-                st.write(row["statement"])
-                st.caption(f"Rationale: {row['rationale']}")
-                st.caption(f"Verification: {row['verification_method']}")
-                if st.button(f"Jump to source ({row['id']})", key=f"req_jump_{row['id']}"):
-                    st.session_state["selected_section_id"] = row["section_id"]
+    if not due:
+        st.success("All clear. No due reviews for now.")
+        return
 
-    c1, c2 = st.columns(2)
+    for word in due[:12]:
+        render_word_card(engine, word.id, include_actions=False)
+        quality = st.slider(f"How well did you remember '{word.word}'?", 0, 5, 3, key=f"q_{word.id}")
+        if st.button("Save review", key=f"save_review_{word.id}"):
+            engine.record_result(word.id, quality=quality, source="review")
+            save_progress(engine.progress)
+            st.success("Review saved.")
+
+
+def screen_progress(engine: VocabAppEngine) -> None:
+    st.title("Progress Analytics")
+    snap = engine.progress_snapshot()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Words Learned", engine.progress.total_words_learned)
+    m2.metric("Mastery Score", f"{sum(s.mastery for s in engine.progress.word_states.values())/len(engine.progress.word_states):.0%}")
+    m3.metric("Longest Streak", engine.progress.longest_streak)
+    m4.metric("Forgotten Words", len(engine.progress.forgotten_words))
+
+    weak = snap["weak_areas"]
+    if weak:
+        df = pd.DataFrame(weak)
+        fig = px.bar(df, x="category", y="weakness", title="Weak areas (higher means more review needed)", color="weakness", color_continuous_scale="Teal")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### Study consistency heatmap")
+    heat = pd.DataFrame(snap["heatmap"])
+    fig2 = px.imshow(heat, color_continuous_scale=["#f0fdfa", "#14b8a6", "#0f766e"], aspect="auto")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.markdown("### Personal bests")
+    st.write(f"Best streak: {engine.progress.longest_streak} days")
+    st.write(f"Most words completed in one day: {max([h.get('completed', 0) for h in engine.progress.history] or [0])}")
+
+
+def screen_saved(engine: VocabAppEngine) -> None:
+    st.title("Saved Words and Favorites")
+    st.markdown("### Favorites")
+    for wid in engine.progress.favorites:
+        render_word_card(engine, wid, include_actions=False)
+
+    st.markdown("### Custom lists")
+    for list_name, word_ids in engine.progress.custom_lists.items():
+        with st.expander(f"{list_name} ({len(word_ids)})"):
+            for wid in word_ids:
+                st.write(f"- {engine.word_map[wid].word}")
+
+    st.markdown("### Forgotten words")
+    for wid in engine.progress.forgotten_words[-12:]:
+        st.write(f"- {engine.word_map[wid].word}")
+
+
+def screen_settings(engine: VocabAppEngine) -> None:
+    st.title("Settings")
+
+    st.session_state.dark_mode = st.toggle("Dark mode", value=st.session_state.dark_mode)
+    goal = st.selectbox("Learning focus", list(GOAL_TO_CATEGORIES.keys()), index=list(GOAL_TO_CATEGORIES.keys()).index(engine.progress.goal))
+    daily = st.slider("Daily goal", 5, 20, engine.progress.daily_goal)
+    reminder = st.time_input("Daily reminder placeholder", value=None)
+
+    st.markdown("### Search and filters")
+    query = st.text_input("Search words instantly")
+    difficulty = st.selectbox("Difficulty", ["all", "easy", "medium", "hard"])
+    categories = sorted({w.category for w in engine.words})
+    category = st.selectbox("Category", ["all"] + categories)
+    mastery_bucket = st.selectbox("Mastery", ["all", "new", "learning", "mastered"])
+
+    rows = engine.search(query) if query.strip() else engine.filtered_words(difficulty, category, mastery_bucket)
+    st.caption(f"Showing {len(rows)} words")
+    for word in rows[:10]:
+        st.write(f"- {word.word} ({word.difficulty}, {word.category})")
+
+    if st.button("Save settings", type="primary"):
+        engine.progress.goal = goal
+        engine.progress.daily_goal = daily
+        save_progress(engine.progress)
+        st.success("Settings saved.")
+
+    st.caption(f"Reminder placeholder set to: {reminder}")
+    st.caption("Offline-ready note: all progress persists to local JSON store for backend-free operation.")
+
+
+def screen_profile(engine: VocabAppEngine) -> None:
+    st.title("User Profile")
+    snap = engine.progress_snapshot()
+
+    c1, c2 = st.columns([1, 1.2])
     with c1:
-        st.download_button(
-            "Export Checklist CSV",
-            data=export_requirements_csv(analysis),
-            file_name="requirements_checklist.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        st.markdown(f"## {engine.progress.profile_name}")
+        st.write(f"Rank: {snap['rank']}")
+        st.write(f"Level: {engine.progress.level}")
+        st.write(f"XP: {engine.progress.xp}/{snap['xp_to_next']}")
+        st.write(f"Goal: {engine.progress.goal}")
+
     with c2:
-        st.download_button(
-            "Export Checklist JSON",
-            data=export_requirements_json(analysis),
-            file_name="requirements_checklist.json",
-            mime="application/json",
-            use_container_width=True,
+        st.markdown("### Weekly challenge")
+        st.info("Finish 30 review cards and 20 quiz questions this week for the Champion badge.")
+
+        st.markdown("### Leaderboard (placeholder)")
+        board = pd.DataFrame(
+            [
+                {"User": engine.progress.profile_name, "XP": engine.progress.xp + engine.progress.level * 100},
+                {"User": "Avery", "XP": 1620},
+                {"User": "Maya", "XP": 1490},
+                {"User": "Liam", "XP": 1310},
+            ]
+        ).sort_values("XP", ascending=False)
+        st.dataframe(board, use_container_width=True)
+
+    st.markdown("### Confusing word pairs mini game")
+    pairs = engine.confused_pairs()
+    if pairs:
+        pair = random.choice(pairs)
+        guess = st.radio(
+            f"Which word means: {pair['hint']}",
+            [pair["word"], pair["confused"]],
+            key="pair_guess",
         )
-
-
-def render_visual_insights_tab(analysis: AnalysisResult) -> None:
-    section_by_id = {section.id: section for section in analysis.sections}
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### Timeline")
-        if analysis.timeline:
-            timeline_df = pd.DataFrame(analysis.timeline)
-            timeline_df["order"] = range(1, len(timeline_df) + 1)
-            fig = px.scatter(
-                timeline_df,
-                x="date",
-                y="order",
-                hover_data=["section_title", "snippet"],
-                title="Dates and Deadlines Found in Document",
-            )
-            fig.update_traces(customdata=timeline_df[["section_id"]].values)
-            if plotly_events:
-                clicked = plotly_events(fig, click_event=True, key="timeline_click")
-                if clicked:
-                    point = clicked[0]
-                    idx = point.get("pointIndex")
-                    if idx is not None:
-                        section_id = timeline_df.iloc[int(idx)]["section_id"]
-                        if section_id:
-                            st.session_state["selected_section_id"] = section_id
+        if st.button("Check pair game"):
+            if guess == pair["word"]:
+                st.success("Correct distinction. Great precision.")
             else:
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No parseable timeline dates were found.")
-
-    with col2:
-        st.markdown("#### Topic Frequency")
-        topic_df = pd.DataFrame(
-            [{"topic": key, "count": value} for key, value in analysis.topic_frequencies.items()]
-        )
-        if topic_df.empty:
-            st.info("No topic frequency data available.")
-        else:
-            top_df = topic_df.head(20)
-            fig = px.bar(top_df, x="topic", y="count", title="Most Frequent Concepts")
-            section_map = {}
-            for entity in analysis.entities:
-                section_map[entity.label] = entity.citations[0].section_id if entity.citations else ""
-            top_df = top_df.copy()
-            top_df["section_id"] = top_df["topic"].map(section_map).fillna("")
-            fig.update_traces(customdata=top_df[["section_id"]].values)
-            fig.update_layout(xaxis_tickangle=-35)
-            if plotly_events:
-                clicked = plotly_events(fig, click_event=True, key="topic_click")
-                if clicked:
-                    idx = clicked[0].get("pointIndex")
-                    if idx is not None:
-                        section_id = top_df.iloc[int(idx)]["section_id"]
-                        if section_id:
-                            st.session_state["selected_section_id"] = section_id
-            else:
-                st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("#### Risk / Ambiguity Heatmap")
-    if analysis.sections:
-        heat_df = pd.DataFrame(
-            {
-                "section": [section.title for section in analysis.sections],
-                "risk": [section.risk_score for section in analysis.sections],
-                "ambiguity": [section.ambiguity_score for section in analysis.sections],
-                "section_id": [section.id for section in analysis.sections],
-                "snippet": [section.text[:120] for section in analysis.sections],
-            }
-        )
-
-        z = heat_df[["risk", "ambiguity"]].values
-        fig = go.Figure(
-            data=go.Heatmap(
-                z=z,
-                x=["risk", "ambiguity"],
-                y=heat_df["section"].tolist(),
-                colorscale="YlOrRd",
-                text=[
-                    [f"{row['section']}: {row['snippet']}", f"{row['section']}: {row['snippet']}"]
-                    for _, row in heat_df.iterrows()
-                ],
-                hovertemplate="%{text}<br>Metric: %{x}<br>Score: %{z:.2f}<extra></extra>",
-            )
-        )
-        fig.update_layout(height=420)
-        if plotly_events:
-            clicked = plotly_events(fig, click_event=True, key="heatmap_click")
-            if clicked:
-                point = clicked[0]
-                section_title = point.get("y")
-                if section_title:
-                    section = next((item for item in analysis.sections if item.title == section_title), None)
-                    if section:
-                        st.session_state["selected_section_id"] = section.id
-        else:
-            st.plotly_chart(fig, use_container_width=True)
-
-
-def render_qa_tab(analysis: AnalysisResult) -> None:
-    st.markdown("#### Q&A Workbench (Grounded)")
-
-    for idx, turn in enumerate(st.session_state.get("qa_history", []), start=1):
-        with st.chat_message("user"):
-            st.write(turn["question"])
-        with st.chat_message("assistant"):
-            st.write(turn["answer"])
-            if turn.get("supported"):
-                st.caption(f"Confidence score: {turn.get('score', 0.0):.3f}")
-                for c_idx, citation in enumerate(turn.get("citations", []), start=1):
-                    st.caption(f"[{c_idx}] {citation.section_title}: {citation.snippet}")
-                    if st.button(
-                        f"Jump to cited section {c_idx}",
-                        key=f"qa_jump_{idx}_{c_idx}",
-                    ):
-                        jump_to_citation(citation)
-            else:
-                st.warning("Not found in document")
-                nearest = turn.get("nearest", [])
-                if nearest:
-                    st.caption("Nearest relevant sections:")
-                    for n_idx, citation in enumerate(nearest, start=1):
-                        st.caption(f"- {citation.section_title}: {citation.snippet}")
-                        if st.button(
-                            f"Jump to nearest section {n_idx}",
-                            key=f"qa_near_{idx}_{n_idx}",
-                        ):
-                            jump_to_citation(citation)
-
-    prompt = st.chat_input("Ask a question about this document")
-    if prompt:
-        response = answer_question(prompt, analysis)
-        st.session_state["qa_history"].append(
-            {
-                "question": prompt,
-                "answer": response.answer,
-                "supported": response.supported,
-                "score": response.score,
-                "citations": response.citations,
-                "nearest": response.nearest_sections,
-            }
-        )
-        st.rerun()
+                st.warning("Not quite. Review that pair in Word Detail.")
 
 
 def main() -> None:
-    st.set_page_config(
-        page_title="Document Intelligence Dashboard",
-        page_icon="📘",
-        layout="wide",
-    )
-    init_state()
-
-    st.title("Document Intelligence Dashboard")
-    st.caption("Dynamic deep-dive interface for DOCX/PDF/TXT documents with grounded exploration tools.")
+    ensure_session()
+    inject_theme(st.session_state.dark_mode)
+    engine = VocabAppEngine(progress=st.session_state.progress)
 
     with st.sidebar:
-        st.header("Document Input")
-        uploaded_file = st.file_uploader("Upload DOCX, PDF, or TXT", type=["docx", "pdf", "txt"])
-        st.caption(f"Default path: `{DEFAULT_DOC_PATH}`")
+        st.markdown("# LexiLift")
+        st.caption("Daily Vocabulary Intelligence")
 
-    analysis, source_name = get_analysis(uploaded_file)
-    if analysis is None:
-        st.warning("Upload a document or place the default file at the configured path.")
-        st.stop()
+        page = st.radio(
+            "Navigate",
+            [
+                "Onboarding",
+                "Home Dashboard",
+                "Daily Words",
+                "Word Detail",
+                "Quiz Mode",
+                "Review Mode",
+                "Progress Analytics",
+                "Saved Words",
+                "Settings",
+                "User Profile",
+            ],
+        )
 
-    if analysis.warnings:
-        with st.expander("Pipeline Warnings"):
-            for warning in analysis.warnings:
-                st.write(f"- {warning}")
+        st.markdown("---")
+        st.metric("Today", f"Day {engine.progress.current_day}")
+        st.metric("Streak", f"{engine.progress.streak_days} days")
+        st.metric("XP", engine.progress.xp)
 
-    st.success(
-        f"Loaded `{analysis.file_name}` ({analysis.file_type.upper()}) | "
-        f"Sections: {len(analysis.sections)} | Entities: {len(analysis.entities)} | "
-        f"Requirements: {len(analysis.requirements)}"
-    )
+    page_handlers = {
+        "Onboarding": screen_onboarding,
+        "Home Dashboard": screen_home,
+        "Daily Words": screen_daily_words,
+        "Word Detail": screen_word_detail,
+        "Quiz Mode": screen_quiz,
+        "Review Mode": screen_review,
+        "Progress Analytics": screen_progress,
+        "Saved Words": screen_saved,
+        "Settings": screen_settings,
+        "User Profile": screen_profile,
+    }
 
-    command_palette_ui(analysis)
-    if st.session_state.get("command_notice"):
-        st.info(st.session_state["command_notice"])
-
-    section_by_id, block_by_id, entities_by_section = section_maps(analysis)
-    ensure_selected_section(analysis)
-
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        [
-            "Overview",
-            "Outline Navigator",
-            "Entities & Relationships",
-            "Requirements / Rubric Builder",
-            "Visual Insights",
-            "Q&A Workbench",
-        ]
-    )
-
-    with tab1:
-        render_overview_tab(analysis)
-    with tab2:
-        render_outline_tab(analysis, section_by_id, block_by_id, entities_by_section)
-    with tab3:
-        render_entities_tab(analysis)
-    with tab4:
-        render_requirements_tab(analysis)
-    with tab5:
-        render_visual_insights_tab(analysis)
-    with tab6:
-        render_qa_tab(analysis)
+    page_handlers[page](engine)
 
 
 if __name__ == "__main__":
